@@ -1,13 +1,13 @@
 {
-  "Author": "darkarchon",
+  "Author": "Lutherian",
   "Name": "XIVSync",
   "Punchline": "Let others see you as you see yourself.",
   "Description": "This plugin will synchronize your Penumbra mods and current Glamourer state with other paired clients automatically.",
-  "InternalName": "mareSynchronos",
+  "InternalName": "XIVSync",
   "ApplicableVersion": "any",
   "Tags": [
     "customization"
   ],
-  "IconUrl": "https://raw.githubusercontent.com/MareSynchronos/client/main/MareSynchronos/images/logo.png",
-  "RepoUrl": "https://github.com/MareSynchronos/client"
+  "IconUrl": "https://raw.githubusercontent.com/xivsync/repo/main/XIVSync/images/icon.png",
+  "RepoUrl": "https://github.com/xivsync/sync_client"
 }

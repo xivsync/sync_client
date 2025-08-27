@@ -39,6 +39,9 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
     private HubConnection? _mareHub;
     private ServerState _serverState;
     private CensusUpdateMessage? _lastCensus;
+    private HubConnection? _hub;
+    private readonly object _usersLock = new();
+    private int _onlineUsers;
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, MareMediator mediator,
@@ -362,6 +365,16 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
     public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected)
     {
         var dto = await _mareHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
+
+        Logger.LogInformation(
+            "GetConnectionDto <= Shard={Shard} Created={Created} Joined={Joined} GroupUserCount={UserCount} FileServer={File}",
+            dto.ServerInfo?.ShardName,
+            dto.ServerInfo?.MaxGroupsCreatedByUser,
+            dto.ServerInfo?.MaxGroupsJoinedByUser,
+            dto.ServerInfo?.MaxGroupUserCount,
+            dto.ServerInfo?.FileServerAddress
+        );
+
         if (publishConnected) Mediator.Publish(new ConnectedMessage(dto));
         return dto;
     }
@@ -592,5 +605,6 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
         ServerState = state;
     }
+
 }
 #pragma warning restore MA0040

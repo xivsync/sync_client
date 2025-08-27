@@ -99,6 +99,16 @@ public class HubFactory : MediatorSubscriberBase
                     // final fallback(last priority)
                     StandardResolver.Instance);
 
+                opt.SerializerOptions = MessagePackSerializerOptions.Standard.WithResolver(
+        CompositeResolver.Create(
+            // Try contractless first so property-name keys work
+            ContractlessStandardResolver.Instance,
+            // Fallbacks & built-ins (Version, Uri, etc.)
+            StandardResolver.Instance
+        )
+    );
+
+
                 opt.SerializerOptions =
                     MessagePackSerializerOptions.Standard
                         .WithCompression(MessagePackCompression.Lz4Block)

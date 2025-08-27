@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging;
 using System.Numerics;
 
 namespace XIVSync.UI;
-
 public class CreateSyncshellUI : WindowMediatorSubscriberBase
 {
     private readonly ApiController _apiController;
@@ -18,9 +17,15 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
     private bool _errorGroupCreate;
     private GroupJoinDto? _lastCreatedGroup;
 
-    public CreateSyncshellUI(ILogger<CreateSyncshellUI> logger, MareMediator mareMediator, ApiController apiController, UiSharedService uiSharedService,
+    // 👇 Add these two fields
+    private bool _creating;
+    private string? _errorText;
+
+    public CreateSyncshellUI(ILogger<CreateSyncshellUI> logger, MareMediator mareMediator,
+        ApiController apiController, UiSharedService uiSharedService,
         PerformanceCollectorService performanceCollectorService)
-        : base(logger, mareMediator, "Create new Syncshell###MareSynchronosCreateSyncshell", performanceCollectorService)
+        : base(logger, mareMediator,
+            "Create new Syncshell###MareSynchronosCreateSyncshell", performanceCollectorService)
     {
         _apiController = apiController;
         _uiSharedService = uiSharedService;
@@ -42,17 +47,29 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
 
         if (_lastCreatedGroup == null)
         {
-            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "Create Syncshell"))
+            if (!_creating && _uiSharedService.IconTextButton(FontAwesomeIcon.Plus, "Create Syncshell"))
             {
-                try
+                _creating = true;
+                _errorGroupCreate = false;
+                _errorText = null;
+
+                _ = Task.Run(async () =>
                 {
-                    _lastCreatedGroup = _apiController.GroupCreate().Result;
-                }
-                catch
-                {
-                    _lastCreatedGroup = null;
-                    _errorGroupCreate = true;
-                }
+                    try
+                    {
+                        _lastCreatedGroup = await _apiController.GroupCreate().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _lastCreatedGroup = null;
+                        _errorGroupCreate = true;
+                        _errorText = ex.Message; // 👈 save message
+                    }
+                    finally
+                    {
+                        _creating = false;
+                    }
+                });
             }
             ImGui.SameLine();
         }
@@ -61,22 +78,14 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
 
         if (_lastCreatedGroup == null)
         {
-            UiSharedService.TextWrapped("Creating a new Syncshell will create it with your current preferred permissions for Syncshells as default suggested permissions." + Environment.NewLine +
-                "- You can own up to " + _apiController.ServerInfo.MaxGroupsCreatedByUser + " Syncshells on this server." + Environment.NewLine +
-                "- You can join up to " + _apiController.ServerInfo.MaxGroupsJoinedByUser + " Syncshells on this server (including your own)" + Environment.NewLine +
-                "- Syncshells on this server can have a maximum of " + _apiController.ServerInfo.MaxGroupUserCount + " users");
-            ImGuiHelpers.ScaledDummy(2f);
-            ImGui.TextUnformatted("Your current Syncshell preferred permissions are:");
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("- Animations");
-            _uiSharedService.BooleanToColoredIcon(!_apiController.DefaultPermissions!.DisableGroupAnimations);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("- Sounds");
-            _uiSharedService.BooleanToColoredIcon(!_apiController.DefaultPermissions!.DisableGroupSounds);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("- VFX");
-            _uiSharedService.BooleanToColoredIcon(!_apiController.DefaultPermissions!.DisableGroupVFX);
-            UiSharedService.TextWrapped("(Those preferred permissions can be changed anytime after Syncshell creation, your defaults can be changed anytime in the Mare Settings)");
+            UiSharedService.TextWrapped(
+                "Creating a new Syncshell will create it with your current preferred permissions..." +
+                Environment.NewLine +
+                "- You can own up to " + _apiController.ServerInfo.MaxGroupsCreatedByUser + " Syncshells..." +
+                Environment.NewLine +
+                "- You can join up to " + _apiController.ServerInfo.MaxGroupsJoinedByUser + " Syncshells..." +
+                Environment.NewLine +
+                "- Syncshells can have a maximum of " + _apiController.ServerInfo.MaxGroupUserCount + " users");
         }
         else
         {
@@ -86,27 +95,17 @@ public class CreateSyncshellUI : WindowMediatorSubscriberBase
             ImGui.TextUnformatted("Syncshell Password: " + _lastCreatedGroup.Password);
             ImGui.SameLine();
             if (_uiSharedService.IconButton(FontAwesomeIcon.Copy))
-            {
                 ImGui.SetClipboardText(_lastCreatedGroup.Password);
-            }
-            UiSharedService.TextWrapped("You can change the Syncshell password later at any time.");
-            ImGui.Separator();
-            UiSharedService.TextWrapped("These settings were set based on your preferred syncshell permissions:");
-            ImGuiHelpers.ScaledDummy(2f);
-            ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped("Suggest Animation sync:");
-            _uiSharedService.BooleanToColoredIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableAnimations());
-            ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped("Suggest Sounds sync:");
-            _uiSharedService.BooleanToColoredIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableSounds());
-            ImGui.AlignTextToFramePadding();
-            UiSharedService.TextWrapped("Suggest VFX sync:");
-            _uiSharedService.BooleanToColoredIcon(!_lastCreatedGroup.GroupUserPreferredPermissions.IsDisableVFX());
         }
 
         if (_errorGroupCreate)
         {
-            UiSharedService.ColorTextWrapped("Something went wrong during creation of a new Syncshell", new Vector4(1, 0, 0, 1));
+            UiSharedService.ColorTextWrapped(
+                "Something went wrong during creation of a new Syncshell",
+                new Vector4(1, 0, 0, 1));
+
+            if (!string.IsNullOrEmpty(_errorText))
+                UiSharedService.TextWrapped($"Details: {_errorText}");
         }
     }
 
