@@ -26,6 +26,12 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 using System.Reflection;
+using System;
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Dalamud.Plugin.Services;
+
 
 namespace XIVSync.UI;
 
@@ -71,6 +77,10 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _voiceDeafened;
     private float _voicePartHeight = -1f;
 
+    private double _nextUsersRefreshAt = 0;        // ImGui time (seconds)
+    private const double UsersRefreshInterval = 5; // refresh every 5s
+
+
 
     public CompactUi(ILogger<CompactUi> logger, UiSharedService uiShared, MareConfigService configService, ApiController apiController, PairManager pairManager,
         ServerConfigurationManager serverManager, MareMediator mediator, FileUploadManager fileTransferManager,
@@ -99,8 +109,18 @@ public class CompactUi : WindowMediatorSubscriberBase
         _ipcManager = ipcManager;
         _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
 
-        var saved = _configService.Current.Theme;
-        if (saved != null) _theme = Clone(saved);
+
+        if (_configService.Current?.Theme != null)
+        {
+            _theme = Clone(_configService.Current.Theme);
+        }
+
+        _apiController.OnlineUsersChanged += _ =>
+        {
+            // if your header centers numbers, this helps it re-measure
+            Mediator.Publish(new RefreshUiMessage());
+        };
+
 
         AllowPinning = false;
         AllowClickthrough = false;
@@ -148,6 +168,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<DownloadFinishedMessage>(this, (msg) => _currentDownloads.TryRemove(msg.DownloadId, out _));
         Mediator.Subscribe<RefreshUiMessage>(this, (msg) => _drawFolders = GetDrawFolders().ToList());
     }
+
 
     protected override void DrawInternal()
     {
@@ -268,11 +289,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                     using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
                     using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
                     // ... after DrawTransfers() and before modal popups / end-child:
-                    ImGui.Separator();
-                    float voiceStart = ImGui.GetCursorPosY();
-                    using (ImRaii.PushId("proximity-voice"))
-                        DrawProximityVoice();
-                    _voicePartHeight = ImGui.GetCursorPosY() - voiceStart;
+                    //ImGui.Separator();
+                    //float voiceStart = ImGui.GetCursorPosY();
+                    //using (ImRaii.PushId("proximity-voice"))
+                    //    DrawProximityVoice();
+                    //_voicePartHeight = ImGui.GetCursorPosY() - voiceStart;
 
                 }
             }
@@ -328,6 +349,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawPairs()
     {
+        // compute available list height (unchanged)
         float availY = ImGui.GetContentRegionAvail().Y;
 
         float transfersH = _transferPartHeight > 0f
@@ -338,16 +360,43 @@ public class CompactUi : WindowMediatorSubscriberBase
             ? _voicePartHeight
             : EstimateVoiceHeightFromStyle();
 
-        float spacing = ImGui.GetStyle().ItemSpacing.Y;
+        float spacingY = ImGui.GetStyle().ItemSpacing.Y;
 
-        float listH = MathF.Max(1f, availY - transfersH - voiceH - spacing);
-        listH *= 0.95f; // keep a little breathing room
+        float listH = MathF.Max(1f, availY - transfersH - voiceH - spacingY);
+        listH *= 0.95f; // breathing room
+
+        // --- row padding & nicer hover/active colors for anything using Selectable/Headers ---
+        // Tweak these to taste:
+        var rowFramePadding = new Vector2(8f, 6f);     // more vertical padding per row
+        var rowItemSpacing = new Vector2(6f, 4f);     // space between controls/rows
+
+        // Use your theme's button/hover colors for row hovers (feels cohesive)
+        var header = _theme.Btn;
+        var headerHovered = _theme.BtnHovered;
+        var headerActive = _theme.BtnActive;
 
         ImGui.BeginChild("list", new Vector2(_windowContentWidth, listH), border: false);
-        foreach (var item in _drawFolders)
-            item.Draw();
+
+        // All rows drawn inside get larger hitboxes + better hover/active
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, rowFramePadding);
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, rowItemSpacing);
+        ImGui.PushStyleColor(ImGuiCol.Header, header);
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, headerHovered);
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, headerActive);
+
+        // If your row widgets are using Selectable, also make them span full width by default:
+        // (This flag is "sticky" only for Selectable calls—kept here as a hint for consumers.)
+        // Not strictly necessary, but if your row code passes size.X = 0 or -1, they’ll fill width.
+
+        foreach (var folder in _drawFolders)
+            folder.Draw();
+
+        ImGui.PopStyleColor(3);
+        ImGui.PopStyleVar(2);
+
         ImGui.EndChild();
     }
+
 
     private static float EstimateVoiceHeightFromStyle()
     {
@@ -381,7 +430,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         var printShard = !string.IsNullOrEmpty(_apiController.ServerInfo.ShardName) && shardConnection != string.Empty;
 
         if (_apiController.ServerState is ServerState.Connected)
-        {
+        {       
+
             ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth()) / 2 - (userSize.X + textSize.X) / 2 - ImGui.GetStyle().ItemSpacing.X / 2);
             if (!printShard) ImGui.AlignTextToFramePadding();
             ImGui.TextColored(_theme.Accent, userCount);
@@ -929,18 +979,22 @@ public class CompactUi : WindowMediatorSubscriberBase
 
         ImGui.Separator();
 
-        DrawColorRow("Panel Background", ref _themeWorking.PanelBg);
-        DrawColorRow("Panel Border", ref _themeWorking.PanelBorder);
-        DrawColorRow("Header Background", ref _themeWorking.HeaderBg);
-        DrawColorRow("Accent", ref _themeWorking.Accent);
-        DrawColorRow("Button", ref _themeWorking.Btn);
-        DrawColorRow("Button Hovered", ref _themeWorking.BtnHovered);
-        DrawColorRow("Button Active", ref _themeWorking.BtnActive);
-        DrawColorRow("Text Primary", ref _themeWorking.TextPrimary);
-        DrawColorRow("Text Secondary", ref _themeWorking.TextSecondary);
-        DrawColorRow("Text Disabled", ref _themeWorking.TextDisabled);
-        DrawColorRow("Link", ref _themeWorking.Link);
-        DrawColorRow("Link Hover", ref _themeWorking.LinkHover);
+        DrawColorRow("Panel Background", () => _themeWorking.PanelBg, v => _themeWorking.PanelBg = v);
+        DrawColorRow("Panel Border", () => _themeWorking.PanelBorder, v => _themeWorking.PanelBorder = v);
+        DrawColorRow("Header Background", () => _themeWorking.HeaderBg, v => _themeWorking.HeaderBg = v);
+        DrawColorRow("Accent", () => _themeWorking.Accent, v => _themeWorking.Accent = v);
+
+        DrawColorRow("Button", () => _themeWorking.Btn, v => _themeWorking.Btn = v);
+        DrawColorRow("Button Hovered", () => _themeWorking.BtnHovered, v => _themeWorking.BtnHovered = v);
+        DrawColorRow("Button Active", () => _themeWorking.BtnActive, v => _themeWorking.BtnActive = v);
+
+        DrawColorRow("Text Primary", () => _themeWorking.TextPrimary, v => _themeWorking.TextPrimary = v);
+        DrawColorRow("Text Secondary", () => _themeWorking.TextSecondary, v => _themeWorking.TextSecondary = v);
+        DrawColorRow("Text Disabled", () => _themeWorking.TextDisabled, v => _themeWorking.TextDisabled = v);
+
+        DrawColorRow("Link", () => _themeWorking.Link, v => _themeWorking.Link = v);
+        DrawColorRow("Link Hover", () => _themeWorking.LinkHover, v => _themeWorking.LinkHover = v);
+
 
         ImGui.Separator();
 
@@ -992,11 +1046,17 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             _configService.Current.Theme = theme;
             _configService.Save();
+
         }
-        catch { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save theme");
+        }
     }
 
-    private static void DrawColorRow(string label, ref Vector4 color)
+
+
+    private static void DrawColorRow(string label, Func<Vector4> get, Action<Vector4> set)
     {
         float labelWidth = 200f * ImGuiHelpers.GlobalScale;
         float swatchSize = 22f * ImGuiHelpers.GlobalScale;
@@ -1006,6 +1066,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.SameLine(labelWidth);
 
         ImGui.PushID(label);
+
+        var color = get();
 
         ImGui.ColorButton("##swatch", color,
             ImGuiColorEditFlags.AlphaPreviewHalf,
@@ -1021,6 +1083,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                       | ImGuiColorEditFlags.NoSidePreview;
 
             ImGui.ColorPicker4("##picker", ref color, flags);
+
+            // push updated color back to your theme
+            set(color);
 
             ImGui.EndPopup();
         }
@@ -1266,24 +1331,90 @@ public class CompactUi : WindowMediatorSubscriberBase
     }
 
 
+
 }
 
 public sealed class ThemePalette
 {
-    public Vector4 PanelBg = new(0.07f, 0.08f, 0.12f, 0.98f);
-    public Vector4 PanelBorder = new(0.25f, 0.45f, 0.95f, 1.00f);
-    public Vector4 HeaderBg = new(0.12f, 0.20f, 0.36f, 1.00f);
-    public Vector4 Accent = new(0.25f, 0.55f, 0.95f, 1.00f);
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 PanelBg { get; set; } = new(0.07f, 0.08f, 0.12f, 0.98f);
 
-    // TEXT
-    public Vector4 TextPrimary = new(0.85f, 0.90f, 1.00f, 1.00f);
-    public Vector4 TextSecondary = new(0.70f, 0.75f, 0.85f, 1.00f);
-    public Vector4 TextDisabled = new(0.50f, 0.55f, 0.65f, 1.00f);
-    public Vector4 Link = new(0.30f, 0.70f, 1.00f, 1.00f);
-    public Vector4 LinkHover = new(0.45f, 0.82f, 1.00f, 1.00f);
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 PanelBorder { get; set; } = new(0.25f, 0.45f, 0.95f, 1.00f);
 
-    // BUTTONS
-    public Vector4 Btn = new(0.15f, 0.18f, 0.25f, 1.00f);
-    public Vector4 BtnHovered = new(0.25f, 0.45f, 0.95f, 1.00f);
-    public Vector4 BtnActive = new(0.20f, 0.35f, 0.75f, 1.00f);
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 HeaderBg { get; set; } = new(0.12f, 0.20f, 0.36f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 Accent { get; set; } = new(0.25f, 0.55f, 0.95f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 TextPrimary { get; set; } = new(0.85f, 0.90f, 1.00f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 TextSecondary { get; set; } = new(0.70f, 0.75f, 0.85f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 TextDisabled { get; set; } = new(0.50f, 0.55f, 0.65f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 Link { get; set; } = new(0.30f, 0.70f, 1.00f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 LinkHover { get; set; } = new(0.45f, 0.82f, 1.00f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 Btn { get; set; } = new(0.15f, 0.18f, 0.25f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 BtnHovered { get; set; } = new(0.25f, 0.45f, 0.95f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 BtnActive { get; set; } = new(0.20f, 0.35f, 0.75f, 1.00f);
+}
+public sealed class Vector4JsonConverter : JsonConverter<Vector4>
+{
+    public override Vector4 Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        // Support both array [r,g,b,a] and object { "x":..,"y":..,"z":..,"w":.. }
+        if (reader.TokenType == JsonTokenType.StartArray)
+        {
+            reader.Read(); var x = reader.GetSingle();
+            reader.Read(); var y = reader.GetSingle();
+            reader.Read(); var z = reader.GetSingle();
+            reader.Read(); var w = reader.GetSingle();
+            reader.Read(); // EndArray
+            return new Vector4(x, y, z, w);
+        }
+        if (reader.TokenType == JsonTokenType.StartObject)
+        {
+            float x = 0, y = 0, z = 0, w = 0;
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+            {
+                var name = reader.GetString();
+                reader.Read();
+                var v = reader.GetSingle();
+                switch (name!.ToLowerInvariant())
+                {
+                    case "x": case "r": case "red": x = v; break;
+                    case "y": case "g": case "green": y = v; break;
+                    case "z": case "b": case "blue": z = v; break;
+                    case "w": case "a": case "alpha": w = v; break;
+                }
+            }
+            return new Vector4(x, y, z, w);
+        }
+        throw new JsonException("Invalid Vector4 JSON.");
+    }
+
+    public override void Write(Utf8JsonWriter writer, Vector4 value, JsonSerializerOptions options)
+    {
+        // Compact, interoperable: write as [r,g,b,a]
+        writer.WriteStartArray();
+        writer.WriteNumberValue(value.X);
+        writer.WriteNumberValue(value.Y);
+        writer.WriteNumberValue(value.Z);
+        writer.WriteNumberValue(value.W);
+        writer.WriteEndArray();
+    }
 }

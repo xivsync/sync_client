@@ -1942,7 +1942,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ImGui.SameLine();
         if (ImGui.Button("XIVSync Discord"))
         {
-            Util.OpenLink("https://discord.gg/mpNdkrTRjW");
+            Util.OpenLink("https://discord.gg/DUNmcCqcH3");
         }
         ImGui.Separator();
         if (ImGui.BeginTabBar("mainTabBar"))

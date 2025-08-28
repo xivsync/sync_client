@@ -42,6 +42,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
     private HubConnection? _hub;
     private readonly object _usersLock = new();
     private int _onlineUsers;
+    public event Action<int>? OnlineUsersChanged;
+    public int OnlineUsers => Volatile.Read(ref _onlineUsers);
 
     public ApiController(ILogger<ApiController> logger, HubFactory hubFactory, DalamudUtilService dalamudUtil,
         PairManager pairManager, ServerConfigurationManager serverManager, MareMediator mediator,
@@ -82,8 +84,6 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
     public bool IsConnected => ServerState == ServerState.Connected;
 
     public bool IsCurrentVersion => (Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0, 0)) >= (_connectionDto?.CurrentClientVersion ?? new Version(0, 0, 0, 0));
-
-    public int OnlineUsers => SystemInfoDto.OnlineUsers;
 
     public bool ServerAlive => ServerState is ServerState.Connected or ServerState.RateLimited or ServerState.Unauthorized or ServerState.Disconnected;
 
@@ -232,6 +232,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
                 _connectionDto = await GetConnectionDto().ConfigureAwait(false);
 
+                // seed from whatever you have (0 if none yet); next push will correct it
+                Volatile.Write(ref _onlineUsers, SystemInfoDto?.OnlineUsers ?? 0);
+                OnlineUsersChanged?.Invoke(_onlineUsers);
+
                 ServerState = ServerState.Connected;
 
                 var currentClientVer = Assembly.GetExecutingAssembly().GetName().Version!;
@@ -359,8 +363,41 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         perm.SetPaused(paused: true);
         await UserSetPairPermissions(new UserPermissionsDto(userData, perm)).ConfigureAwait(false);
     }
+    public async Task RefreshOnlineUsersAsync()
+    {
+        if (_mareHub == null) return;
+
+        // Ask the server for current system info (method name must exist on your hub)
+        var dto = await _mareHub.InvokeAsync<SystemInfoDto>("GetSystemInfo").ConfigureAwait(false);
+
+        // Reuse your handler to update SystemInfoDto / _onlineUsers and raise events
+        await HandleSystemInfoUpdate(dto).ConfigureAwait(false);
+    }
+
+    private Task HandleSystemInfoUpdate(SystemInfoDto dto)
+    {
+        if (dto == null) return Task.CompletedTask;
+
+        var prev = Volatile.Read(ref _onlineUsers);
+
+        SystemInfoDto = dto;
+        Volatile.Write(ref _onlineUsers, dto.OnlineUsers);
+
+        // Log every update, with before/after values
+        Logger.LogInformation("SystemInfo update: OnlineUsers changed {Prev} -> {Now}",
+            prev, dto.OnlineUsers);
+
+        if (dto.OnlineUsers != prev)
+        {
+            OnlineUsersChanged?.Invoke(dto.OnlineUsers);
+            Mediator.Publish(new RefreshUiMessage());
+        }
+
+        return Task.CompletedTask;
+    }
 
     public Task<ConnectionDto> GetConnectionDto() => GetConnectionDtoAsync(true);
+
 
     public async Task<ConnectionDto> GetConnectionDtoAsync(bool publishConnected)
     {
@@ -434,7 +471,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         OnDownloadReady((guid) => _ = Client_DownloadReady(guid));
         OnReceiveServerMessage((sev, msg) => _ = Client_ReceiveServerMessage(sev, msg));
         OnUpdateSystemInfo((dto) => _ = Client_UpdateSystemInfo(dto));
-
+        OnUpdateSystemInfo(dto => _ = HandleSystemInfoUpdate(dto));
         OnUserSendOffline((dto) => _ = Client_UserSendOffline(dto));
         OnUserAddClientPair((dto) => _ = Client_UserAddClientPair(dto));
         OnUserReceiveCharacterData((dto) => _ = Client_UserReceiveCharacterData(dto));
@@ -604,6 +641,27 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         }
 
         ServerState = state;
+    }
+
+    private Task Client_UpdateUsersOnline(SystemInfoDto dto)
+    {
+        if (dto == null) return Task.CompletedTask;
+
+        // remember previous value to avoid noisy events
+        var prev = SystemInfoDto?.OnlineUsers ?? 0;
+
+        // swap the reference atomically (safe to read from UI thread)
+        SystemInfoDto = dto;
+
+        // if changed, notify listeners (and you can ask the UI to reflow if it centers text)
+        if (dto.OnlineUsers != prev)
+        {
+            OnlineUsersChanged?.Invoke(dto.OnlineUsers);
+            // Optional: if your UI needs a gentle nudge to re-measure widths:
+            Mediator.Publish(new RefreshUiMessage());
+        }
+
+        return Task.CompletedTask;
     }
 
 }
