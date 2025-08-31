@@ -1,127 +1,108 @@
-﻿using System;
-using Dalamud.Game.ClientState.Objects.SubKinds;
+﻿using Dalamud.Game.ClientState.Objects.SubKinds;
+using Dalamud.Game.ClientState.Objects.Types;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
+using Dalamud.Plugin.Services;
 using Microsoft.Extensions.Logging;
 using XIVSync.Services;
 using XIVSync.Services.Mediator;
 
 namespace XIVSync.Interop.Ipc;
 
-public sealed class IpcCallerMoodles : IIpcCaller
+public sealed class IpcCallerMoodles : IIpcCaller, IDisposable
 {
+    private readonly ICallGateSubscriber<int> _moodlesApiVersion;
+    private readonly ICallGateSubscriber<IPlayerCharacter, object> _moodlesOnChange;
+    private readonly ICallGateSubscriber<nint, string> _moodlesGetStatus;
+    private readonly ICallGateSubscriber<string, string, object> _moodlesSetStatusByName;
+    private readonly ICallGateSubscriber<string, object> _moodlesClearStatusByName;
     private readonly ILogger<IpcCallerMoodles> _logger;
     private readonly DalamudUtilService _dalamudUtil;
     private readonly MareMediator _mareMediator;
-    private readonly IDalamudPluginInterface _pi;
-
-    private readonly ICallGateSubscriber<int> _moodlesApiVersion;
-    private readonly ICallGateSubscriber<object> _moodlesReady;
-    private readonly ICallGateSubscriber<object> _moodlesUnloading;
-
-    private readonly ICallGateSubscriber<IPlayerCharacter, object> _moodlesOnChange;
-
-    private ICallGateSubscriber<nint, string>? _moodlesGetStatus;
-    private ICallGateSubscriber<nint, string, object>? _moodlesSetStatus;
-    private ICallGateSubscriber<nint, object>? _moodlesRevertStatus;
-
-    public bool APIAvailable { get; private set; }
+    private readonly IObjectTable _objectTable;
 
     public IpcCallerMoodles(
         ILogger<IpcCallerMoodles> logger,
         IDalamudPluginInterface pi,
         DalamudUtilService dalamudUtil,
-        MareMediator mareMediator)
+        MareMediator mareMediator,
+        IObjectTable objectTable)
     {
         _logger = logger;
-        _pi = pi;
         _dalamudUtil = dalamudUtil;
         _mareMediator = mareMediator;
+        _objectTable = objectTable;
 
         _moodlesApiVersion = pi.GetIpcSubscriber<int>("Moodles.Version");
-        _moodlesReady = pi.GetIpcSubscriber<object>("Moodles.Ready");
-        _moodlesUnloading = pi.GetIpcSubscriber<object>("Moodles.Unloading");
-
         _moodlesOnChange = pi.GetIpcSubscriber<IPlayerCharacter, object>("Moodles.StatusManagerModified");
+        _moodlesGetStatus = pi.GetIpcSubscriber<nint, string>("Moodles.GetStatusManagerByPtr");
+        _moodlesSetStatusByName = pi.GetIpcSubscriber<string, string, object>("GagSpeak.SetStatusManagerByName");
+        _moodlesClearStatusByName = pi.GetIpcSubscriber<string, object>("GagSpeak.ClearStatusManagerByName");
+
         _moodlesOnChange.Subscribe(OnMoodlesChange);
-
-        BindGates();
-
-        _moodlesReady.Subscribe(OnMoodlesReady);
-        _moodlesUnloading.Subscribe(OnMoodlesUnloading);
-
         CheckAPI();
     }
 
     private void OnMoodlesChange(IPlayerCharacter character)
-    {
-        _mareMediator.Publish(new MoodlesMessage(character.Address));
-    }
+        => _mareMediator.Publish(new MoodlesMessage(character.Address));
 
-    private void OnMoodlesReady()
-    {
-        _logger.LogDebug("Moodles.Ready");
-        BindGates();
-        CheckAPI();
-    }
-
-    private void OnMoodlesUnloading()
-    {
-        _logger.LogDebug("Moodles.Unloading");
-        APIAvailable = false;
-    }
-
-    private void BindGates()
-    {
-        int ver = 0;
-        bool gotVer = false;
-        try { ver = _moodlesApiVersion.InvokeFunc(); gotVer = true; }
-        catch { gotVer = false; }
-
-        bool useV2 = gotVer ? ver >= 3 : true; // assume newest when unknown
-        string suffix = useV2 ? "V2" : string.Empty;
-
-        _moodlesGetStatus = _pi.GetIpcSubscriber<nint, string>($"Moodles.GetStatusManagerByPtr{suffix}");
-        _moodlesSetStatus = _pi.GetIpcSubscriber<nint, string, object>($"Moodles.SetStatusManagerByPtr{suffix}");
-        _moodlesRevertStatus = _pi.GetIpcSubscriber<nint, object>($"Moodles.ClearStatusManagerByPtr{suffix}");
-
-        _logger.LogDebug("Moodles IPC bound (Version={ver}, useV2={useV2}, suffix='{suffix}')", ver, useV2, suffix);
-    }
+    public bool APIAvailable { get; private set; }
 
     public void CheckAPI()
     {
         try
         {
-            var ver = _moodlesApiVersion.InvokeFunc();
-            APIAvailable = ver >= 1;
-            _logger.LogDebug("Moodles.Version={ver}, APIAvailable={avail}", ver, APIAvailable);
+            var v = _moodlesApiVersion.InvokeFunc();
+            APIAvailable = v == 1;
+            _logger.LogInformation("Moodles IPC version: {Version}, available: {Available}", v, APIAvailable);
         }
         catch (Exception ex)
         {
             APIAvailable = false;
-            _logger.LogDebug(ex, "Moodles.Version check failed");
+            _logger.LogDebug(ex, "Moodles IPC version probe failed");
         }
     }
 
     public void Dispose()
-    {
-        _moodlesOnChange.Unsubscribe(OnMoodlesChange);
-        _moodlesReady.Unsubscribe(OnMoodlesReady);
-        _moodlesUnloading.Unsubscribe(OnMoodlesUnloading);
-    }
+        => _moodlesOnChange.Unsubscribe(OnMoodlesChange);
 
     public async Task<string?> GetStatusAsync(nint address)
     {
         if (!APIAvailable) return null;
         try
         {
-            if (_moodlesGetStatus is null) { BindGates(); if (_moodlesGetStatus is null) return null; }
-            return await _dalamudUtil.RunOnFrameworkThread(() => _moodlesGetStatus!.InvokeFunc(address)).ConfigureAwait(false);
+            return await _dalamudUtil
+                .RunOnFrameworkThread(() => _moodlesGetStatus.InvokeFunc(address))
+                .ConfigureAwait(false);
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Moodles GetStatus failed");
+            _logger.LogWarning(e, "Could not Get Moodles Status");
             return null;
+        }
+    }
+
+    private IPlayerCharacter? GetPcFromAddress(nint address)
+    {
+        foreach (var obj in _objectTable)
+        {
+            if (obj.Address == address && obj is IPlayerCharacter pc)
+                return pc;
+        }
+        return null;
+    }
+
+    private static string ResolvePcName(IPlayerCharacter pc)
+    {
+        var name = pc.Name?.TextValue ?? pc.Name?.ToString() ?? string.Empty;
+        try
+        {
+            var worldName = pc.HomeWorld.Value.Name.ToString();
+            return string.IsNullOrEmpty(worldName) ? name : $"{name}@{worldName}";
+        }
+        catch
+        {
+            return name;
         }
     }
 
@@ -130,12 +111,18 @@ public sealed class IpcCallerMoodles : IIpcCaller
         if (!APIAvailable) return;
         try
         {
-            if (_moodlesSetStatus is null) { BindGates(); if (_moodlesSetStatus is null) return; }
-            await _dalamudUtil.RunOnFrameworkThread(() => _moodlesSetStatus!.InvokeAction(pointer, status)).ConfigureAwait(false);
+            await _dalamudUtil.RunOnFrameworkThread(() =>
+            {
+                var pc = GetPcFromAddress(pointer);
+                if (pc is null) return;
+                var name = ResolvePcName(pc);
+                if (!string.IsNullOrEmpty(name))
+                    _moodlesSetStatusByName.InvokeAction(name, status);
+            }).ConfigureAwait(false);
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Moodles SetStatus failed");
+            _logger.LogWarning(e, "Could not Set Moodles Status");
         }
     }
 
@@ -144,12 +131,18 @@ public sealed class IpcCallerMoodles : IIpcCaller
         if (!APIAvailable) return;
         try
         {
-            if (_moodlesRevertStatus is null) { BindGates(); if (_moodlesRevertStatus is null) return; }
-            await _dalamudUtil.RunOnFrameworkThread(() => _moodlesRevertStatus!.InvokeAction(pointer)).ConfigureAwait(false);
+            await _dalamudUtil.RunOnFrameworkThread(() =>
+            {
+                var pc = GetPcFromAddress(pointer);
+                if (pc is null) return;
+                var name = ResolvePcName(pc);
+                if (!string.IsNullOrEmpty(name))
+                    _moodlesClearStatusByName.InvokeAction(name);
+            }).ConfigureAwait(false);
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Moodles RevertStatus failed");
+            _logger.LogWarning(e, "Could not Clear Moodles Status");
         }
     }
 }
