@@ -30,12 +30,16 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using XIVSync.Services.CharaData;
 using Dalamud.Game;
+using XIVSync.Utils;
 
 namespace XIVSync;
 
 public sealed class Plugin : IDalamudPlugin
 {
     private readonly IHost _host;
+#if DEBUG
+    private DevAutoReloader? _dev;
+#endif
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
@@ -76,7 +80,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             lb.ClearProviders();
             lb.AddDalamudLogging(pluginLog, gameData.HasModifiedGameDataFiles);
-            lb.AddFile(Path.Combine(traceDir, $"mare-trace-{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.log"), (opt) =>
+            lb.AddFile(Path.Combine(traceDir, $"xivsync-trace-{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.log"), (opt) =>
             {
                 opt.Append = true;
                 opt.RollingFilesConvention = FileLoggerOptions.FileRollingConvention.Ascending;
@@ -91,7 +95,6 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<FileDialogManager>();
             collection.AddSingleton(new Dalamud.Localization("MareSynchronos.Localization.", "", useEmbedded: true));
 
-            // add mare related singletons
             collection.AddSingleton<MareMediator>();
             collection.AddSingleton<FileCacheManager>();
             collection.AddSingleton<ServerConfigurationManager>();
@@ -192,7 +195,6 @@ public sealed class Plugin : IDalamudPlugin
 
             collection.AddSingleton<HubFactory>();
 
-            // add scoped services
             collection.AddScoped<DrawEntityFactory>();
             collection.AddScoped<CacheMonitor>();
             collection.AddScoped<UiFactory>();
@@ -243,11 +245,19 @@ public sealed class Plugin : IDalamudPlugin
         })
         .Build();
 
+#if DEBUG
+        try { _dev = new DevAutoReloader(commandManager, watchForDllChanges: true); } catch { }
+#endif
+
         _ = _host.StartAsync();
     }
 
     public void Dispose()
     {
+#if DEBUG
+        _dev?.Dispose();
+        _dev = null;
+#endif
         _host.StopAsync().GetAwaiter().GetResult();
         _host.Dispose();
     }
