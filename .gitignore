@@ -16,6 +16,10 @@
 # Mono auto generated files
 mono_crash.*
 
+# Windows Zone.Identifier alternate data streams
+*Zone.Identifier
+*:Zone.Identifier
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
