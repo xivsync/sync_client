@@ -339,7 +339,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         cts.CancelAfter(TimeSpan.FromSeconds(5));
         _ = Task.Run(async () =>
         {
-            var pair = _pairManager.GetOnlineUserPairs().Single(p => p.UserPair != null && p.UserData == userData);
+            var pair = _pairManager
+                .GetOnlineUserPairs()
+                .Single(p => p.UserPair != null
+                          && string.Equals(p.UserData.UID, userData.UID, StringComparison.Ordinal));
             var perm = pair.UserPair!.OwnPermissions;
             perm.SetPaused(paused: true);
             await UserSetPairPermissions(new UserPermissionsDto(userData, perm)).ConfigureAwait(false);
@@ -358,11 +361,15 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     public async Task PauseAsync(UserData userData)
     {
-        var pair = _pairManager.GetOnlineUserPairs().Single(p => p.UserPair != null && p.UserData == userData);
+        var pair = _pairManager.GetOnlineUserPairs()
+            .Single(p => p.UserPair != null
+                      && string.Equals(p.UserData.UID, userData.UID, StringComparison.Ordinal));
+
         var perm = pair.UserPair!.OwnPermissions;
         perm.SetPaused(paused: true);
         await UserSetPairPermissions(new UserPermissionsDto(userData, perm)).ConfigureAwait(false);
     }
+
     public async Task RefreshOnlineUsersAsync()
     {
         if (_mareHub == null) return;

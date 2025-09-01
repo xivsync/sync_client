@@ -11,6 +11,7 @@ using XIVSync.Services.Events;
 using XIVSync.Services.Mediator;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using XIVSync.API.Data.Enum;
 
 namespace XIVSync.PlayerData.Pairs;
 
@@ -137,31 +138,24 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void MarkPairOnline(OnlineUserIdentDto dto, bool sendNotif = true)
     {
-        if (!_allClientPairs.ContainsKey(dto.User)) throw new InvalidOperationException("No user found for " + dto);
+        if (!_allClientPairs.TryGetValue(dto.User, out var pair))
+        {
+            var minimal = new UserPairDto(dto.User, IndividualPairStatus.None, OwnPermissions: default, OtherPermissions: default);
+            AddUserPair(minimal, addToLastAddedUser: false);
+            pair = _allClientPairs[dto.User];
+        }
 
         Mediator.Publish(new ClearProfileDataMessage(dto.User));
-
-        var pair = _allClientPairs[dto.User];
-        if (pair.HasCachedPlayer)
-        {
-            RecreateLazy();
-            return;
-        }
+        if (!pair.HasCachedPlayer) pair.CreateCachedPlayer(dto);
 
         if (sendNotif && _configurationService.Current.ShowOnlineNotifications
             && (_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs && pair.IsDirectlyPaired && !pair.IsOneSidedPair
-            || !_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs)
-            && (_configurationService.Current.ShowOnlineNotificationsOnlyForNamedPairs && !string.IsNullOrEmpty(pair.GetNote())
-            || !_configurationService.Current.ShowOnlineNotificationsOnlyForNamedPairs))
+                || !_configurationService.Current.ShowOnlineNotificationsOnlyForIndividualPairs))
         {
-            string? note = pair.GetNote();
-            var msg = !string.IsNullOrEmpty(note)
-                ? $"{note} ({pair.UserData.AliasOrUID}) is now online"
-                : $"{pair.UserData.AliasOrUID} is now online";
+            var msg = string.IsNullOrEmpty(pair.UserData.Alias) ? $"{pair.UserData.UID} is now online"
+                                                                : $"{pair.UserData.AliasOrUID} is now online";
             Mediator.Publish(new NotificationMessage("User online", msg, NotificationType.Info, TimeSpan.FromSeconds(5)));
         }
-
-        pair.CreateCachedPlayer(dto);
 
         RecreateLazy();
     }

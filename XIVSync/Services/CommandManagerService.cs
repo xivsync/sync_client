@@ -13,7 +13,7 @@ namespace XIVSync.Services;
 
 public sealed class CommandManagerService : IDisposable
 {
-    private const string _commandName = "/mare";
+    private const string _commandName = "/xiv";
 
     private readonly ApiController _apiController;
     private readonly ICommandManager _commandManager;
@@ -38,11 +38,11 @@ public sealed class CommandManagerService : IDisposable
         {
             HelpMessage = "Opens the XIVSync UI" + Environment.NewLine + Environment.NewLine +
                 "Additionally possible commands:" + Environment.NewLine +
-                "\t /mare toggle - Disconnects from Mare, if connected. Connects to Mare, if disconnected" + Environment.NewLine +
-                "\t /mare toggle on|off - Connects or disconnects to Mare respectively" + Environment.NewLine +
-                "\t /mare gpose - Opens the Mare Character Data Hub window" + Environment.NewLine +
-                "\t /mare analyze - Opens the Mare Character Data Analysis window" + Environment.NewLine +
-                "\t /mare settings - Opens the Mare Settings window"
+                "\t /xiv toggle - Disconnects from XIVSync, if connected. Connects to XIVSync, if disconnected" + Environment.NewLine +
+                "\t /xiv toggle on|off - Connects or disconnects to XIVSync respectively" + Environment.NewLine +
+                "\t /xiv gpose - Opens the XIVSync Character Data Hub window" + Environment.NewLine +
+                "\t /xiv analyze - Opens the XIVSync Character Data Analysis window" + Environment.NewLine +
+                "\t /xiv settings - Opens the XIVSync Settings window"
         });
     }
 

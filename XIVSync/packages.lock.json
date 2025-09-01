@@ -38,6 +38,15 @@
           "K4os.Compression.LZ4": "1.3.8"
         }
       },
+      "Lib.Harmony": {
+        "type": "Direct",
+        "requested": "[2.3.3, )",
+        "resolved": "2.3.3",
+        "contentHash": "qxO8d2q7luoY8mTfCStQFOgRSd3dWZSS0Ffi5nrjX4qFkZxEBAEvNh5b/ZejTl2kY0fJs62LmfRJkBBTeiuuyQ==",
+        "dependencies": {
+          "System.Text.Json": "8.0.1"
+        }
+      },
       "Meziantou.Analyzer": {
         "type": "Direct",
         "requested": "[2.0.213, )",
@@ -513,6 +522,19 @@
         "resolved": "9.0.8",
         "contentHash": "wrpra4YvKXL7VdsQMKPcPxyA8pXK22LcxaKGA8oEndgjLZ1ZSdKXTxEA2cPvvNpMEUBwZlgJ6oZYQ8aJcpapPg=="
       },
+      "System.Text.Encodings.Web": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "yev/k9GHAEGx2Rg3/tU6MQh4HGBXJs70y7j1LaM1i/ER9po+6nnQ6RRqTJn1E7Xu0fbIFK80Nh5EoODxrbxwBQ=="
+      },
+      "System.Text.Json": {
+        "type": "Transitive",
+        "resolved": "8.0.1",
+        "contentHash": "7AWk2za1hSEJBppe/Lg+uDcam2TrDqwIKa9XcPssSwyjC2xa39EKEGul3CO5RWNF+hMuZG4zlBDrvhBdDTg4lg==",
+        "dependencies": {
+          "System.Text.Encodings.Web": "8.0.0"
+        }
+      },
       "System.Threading.Channels": {
         "type": "Transitive",
         "resolved": "9.0.8",
@@ -521,6 +543,7 @@
       "xivsync.api": {
         "type": "Project",
         "dependencies": {
+          "Lib.Harmony": "[2.3.3, )",
           "MessagePack.Annotations": "[3.1.4, )"
         }
       }

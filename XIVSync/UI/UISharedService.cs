@@ -39,8 +39,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
                                            ImGuiWindowFlags.NoScrollWithMouse;
 
     public readonly FileDialogManager FileDialogManager;
-    private const string _notesEnd = "##MARE_SYNCHRONOS_USER_NOTES_END##";
-    private const string _notesStart = "##MARE_SYNCHRONOS_USER_NOTES_START##";
+    private const string _notesEnd = "##XIVSYNC_USER_NOTES_END##";
+    private const string _notesStart = "##XIVSYNC_USER_NOTES_START##";
     private readonly ApiController _apiController;
     private readonly CacheMonitor _cacheMonitor;
     private readonly MareConfigService _configService;
@@ -453,7 +453,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
     public void DrawCacheDirectorySetting()
     {
-        ColorTextWrapped("Note: The storage folder should be somewhere close to root (i.e. C:\\MareStorage) in a new empty folder. DO NOT point this to your game folder. DO NOT point this to your Penumbra folder.", ImGuiColors.DalamudYellow);
+        ColorTextWrapped("Note: The storage folder should be somewhere close to root (i.e. C:\\XIVSync) in a new empty folder. DO NOT point this to your game folder. DO NOT point this to your Penumbra folder.", ImGuiColors.DalamudYellow);
         var cacheDirectory = _configService.Current.CacheFolder;
         ImGui.InputText("Storage Folder##cache", ref cacheDirectory, 255, ImGuiInputTextFlags.ReadOnly);
 

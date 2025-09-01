@@ -268,8 +268,6 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             using (ImRaii.PushId("header")) DrawUIDHeader();
             ImGui.Separator();
-            using (ImRaii.PushId("serverstatus")) DrawServerStatus();
-            ImGui.Separator();
 
             if (_apiController.ServerState is ServerState.Connected)
             {
@@ -281,10 +279,11 @@ public class CompactUi : WindowMediatorSubscriberBase
                 else
                 {
                     using (ImRaii.PushId("global-topmenu")) _tabMenu.Draw();
+
                     using (ImRaii.PushId("pairlist")) DrawPairs();
-                    ImGui.Separator();
+                   // ImGui.Separator();
                     float pairlistEnd = ImGui.GetCursorPosY();
-                    using (ImRaii.PushId("transfers")) DrawTransfers();
+                   // using (ImRaii.PushId("transfers")) DrawTransfers();
                     _transferPartHeight = ImGui.GetCursorPosY() - pairlistEnd - ImGui.GetTextLineHeight();
                     using (ImRaii.PushId("group-user-popup")) _selectPairsForGroupUi.Draw(_pairManager.DirectPairs);
                     using (ImRaii.PushId("grouping-popup")) _selectGroupForPairUi.Draw();
@@ -363,7 +362,7 @@ public class CompactUi : WindowMediatorSubscriberBase
         float spacingY = ImGui.GetStyle().ItemSpacing.Y;
 
         float listH = MathF.Max(1f, availY - transfersH - voiceH - spacingY);
-        listH *= 0.95f; // breathing room
+        listH *= 1.25f; // breathing room
 
         // --- row padding & nicer hover/active colors for anything using Selectable/Headers ---
         // Tweak these to taste:
@@ -421,6 +420,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         var userCount = _apiController.OnlineUsers.ToString(CultureInfo.InvariantCulture);
         var userSize = ImGui.CalcTextSize(userCount);
         var textSize = ImGui.CalcTextSize("Users Online");
+
+
+
 #if DEBUG
         string shardConnection = $"Shard: {_apiController.ServerInfo.ShardName}";
 #else
@@ -574,6 +576,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             UiSharedService.ColorTextWrapped(GetServerError(), GetUidColor());
         }
+
+
     }
 
     private IEnumerable<IDrawFolder> GetDrawFolders()
@@ -796,13 +800,18 @@ public class CompactUi : WindowMediatorSubscriberBase
 
     private void DrawCustomTitleBarOverlay(float headerH)
     {
+        bool isConnectingOrConnected = _apiController.ServerState is ServerState.Connected or ServerState.Connecting or ServerState.Reconnecting;
+        bool isBusy = _apiController.ServerState is ServerState.Reconnecting or ServerState.Disconnecting;
+        var linkColor = UiSharedService.GetBoolColor(!isConnectingOrConnected);
+        var linkIcon = isConnectingOrConnected ? FontAwesomeIcon.Unlink : FontAwesomeIcon.Link;
+
         if (_collapsed)
         {
             float spacing = 6f * ImGuiHelpers.GlobalScale;
             float btnSide = 22f * ImGuiHelpers.GlobalScale;
             float btnH = btnSide;
             float leftPad = 10f * ImGuiHelpers.GlobalScale;
-            float rightPad = ImGui.GetStyle().WindowPadding.X + 6f * ImGuiHelpers.GlobalScale;
+            float rightPad = ImGui.GetStyle().WindowPadding.X + 2f * ImGuiHelpers.GlobalScale;
 
             var winPos = ImGui.GetWindowPos();
             var crMin = ImGui.GetWindowContentRegionMin();
@@ -813,13 +822,12 @@ public class CompactUi : WindowMediatorSubscriberBase
             var headerMax = new Vector2(headerMin.X + contentW, headerMin.Y + headerH);
 
             var dl = ImGui.GetWindowDrawList();
-
             dl.AddRectFilled(headerMin, headerMax, ImGui.ColorConvertFloat4ToU32(_theme.HeaderBg), 10f);
             dl.AddLine(new Vector2(headerMin.X, headerMax.Y),
                        new Vector2(headerMax.X, headerMax.Y),
                        ImGui.ColorConvertFloat4ToU32(_theme.Accent));
 
-            int buttonCount = 4;
+            int buttonCount = 5; // +1 for link/unlink
             float buttonsW = (btnSide * buttonCount) + (spacing * (buttonCount - 1));
             float btnStartX = headerMax.X - rightPad - buttonsW;
             float btnStartY = headerMin.Y + (headerH - btnH) * 0.5f;
@@ -859,10 +867,36 @@ public class CompactUi : WindowMediatorSubscriberBase
             UiSharedService.AttachToolTip("Open Settings");
             x += btnSide + spacing;
 
+            //ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
+            //if (_uiSharedService.IconButton(FontAwesomeIcon.Book))
+            //    Mediator.Publish(new UiToggleMessage(typeof(EventViewerUI)));
+            //UiSharedService.AttachToolTip("Open Event Viewer");
+            //x += btnSide + spacing;
+
+            // Connect/Disconnect button
             ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Book))
-                Mediator.Publish(new UiToggleMessage(typeof(EventViewerUI)));
-            UiSharedService.AttachToolTip("Open Event Viewer");
+            using (ImRaii.PushColor(ImGuiCol.Text, linkColor))
+            {
+                if (isBusy) ImGui.BeginDisabled();
+                if (_uiSharedService.IconButton(linkIcon))
+                {
+                    if (isConnectingOrConnected && !_serverManager.CurrentServer.FullPause)
+                    {
+                        _serverManager.CurrentServer.FullPause = true;
+                        _serverManager.Save();
+                    }
+                    else if (!isConnectingOrConnected && _serverManager.CurrentServer.FullPause)
+                    {
+                        _serverManager.CurrentServer.FullPause = false;
+                        _serverManager.Save();
+                    }
+                    _ = _apiController.CreateConnectionsAsync();
+                }
+                if (isBusy) ImGui.EndDisabled();
+            }
+            UiSharedService.AttachToolTip(isConnectingOrConnected
+                ? "Disconnect from " + _serverManager.CurrentServer.ServerName
+                : "Connect to " + _serverManager.CurrentServer.ServerName);
             x += btnSide + spacing;
 
             ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
@@ -879,16 +913,16 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             float spacing = 6f * ImGuiHelpers.GlobalScale;
             float btnSide = 22f * ImGuiHelpers.GlobalScale;
-            float rightPad = ImGui.GetStyle().WindowPadding.X + 35f * ImGuiHelpers.GlobalScale;
+            float rightPad = ImGui.GetStyle().WindowPadding.X + 20f * ImGuiHelpers.GlobalScale;
 
             var style = ImGui.GetStyle();
-            float topOffset = style.FramePadding.Y + style.ItemSpacing.Y +  ImGuiHelpers.GlobalScale;
+            float topOffset = style.FramePadding.Y + style.ItemSpacing.Y + ImGuiHelpers.GlobalScale;
 
             var winPos = ImGui.GetWindowPos();
             var crMin = ImGui.GetWindowContentRegionMin();
             var crMax = ImGui.GetWindowContentRegionMax();
 
-            float stripWidth = (btnSide * 5f) + spacing * 4f;
+            float stripWidth = (btnSide * 6f) + spacing * 4f; // +1 for link/unlink
             float overlayX = winPos.X + crMax.X - rightPad - stripWidth;
             float overlayY = winPos.Y + crMin.Y + topOffset;
 
@@ -916,10 +950,10 @@ public class CompactUi : WindowMediatorSubscriberBase
             UiSharedService.AttachToolTip("Open Settings");
             ImGui.SameLine(0, spacing);
 
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Book))
-                Mediator.Publish(new UiToggleMessage(typeof(EventViewerUI)));
-            UiSharedService.AttachToolTip("Open Event Viewer");
-            ImGui.SameLine(0, spacing);
+            //if (_uiSharedService.IconButton(FontAwesomeIcon.Book))
+            //    Mediator.Publish(new UiToggleMessage(typeof(EventViewerUI)));
+            //UiSharedService.AttachToolTip("Open Event Viewer");
+            //ImGui.SameLine(0, spacing);
 
             if (_uiSharedService.IconButton(FontAwesomeIcon.Palette))
             {
@@ -928,7 +962,31 @@ public class CompactUi : WindowMediatorSubscriberBase
                 _showThemeInline = true;
             }
             UiSharedService.AttachToolTip("Customize Theme");
+            ImGui.SameLine(0, spacing);
 
+            // Connect/Disconnect button
+            using (ImRaii.PushColor(ImGuiCol.Text, linkColor))
+            {
+                if (isBusy) ImGui.BeginDisabled();
+                if (_uiSharedService.IconButton(linkIcon))
+                {
+                    if (isConnectingOrConnected && !_serverManager.CurrentServer.FullPause)
+                    {
+                        _serverManager.CurrentServer.FullPause = true;
+                        _serverManager.Save();
+                    }
+                    else if (!isConnectingOrConnected && _serverManager.CurrentServer.FullPause)
+                    {
+                        _serverManager.CurrentServer.FullPause = false;
+                        _serverManager.Save();
+                    }
+                    _ = _apiController.CreateConnectionsAsync();
+                }
+                if (isBusy) ImGui.EndDisabled();
+            }
+            UiSharedService.AttachToolTip(isConnectingOrConnected
+                ? "Disconnect from " + _serverManager.CurrentServer.ServerName
+                : "Connect to " + _serverManager.CurrentServer.ServerName);
             ImGui.SameLine(0, spacing);
 
             if (_uiSharedService.IconButton(FontAwesomeIcon.Times))

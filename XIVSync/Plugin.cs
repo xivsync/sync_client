@@ -37,7 +37,6 @@ namespace XIVSync;
 public sealed class Plugin : IDalamudPlugin
 {
     private readonly IHost _host;
-    private readonly IpcCallerMoodles _moodles;
 
 #if DEBUG
     private DevAutoReloader? _dev;
@@ -157,7 +156,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton((s) => new IpcCallerHonorific(s.GetRequiredService<ILogger<IpcCallerHonorific>>(), pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<MareMediator>()));
             collection.AddSingleton((s) => new IpcCallerMoodles(s.GetRequiredService<ILogger<IpcCallerMoodles>>(), pluginInterface,
-                s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<MareMediator>(), objectTable));
+                s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<MareMediator>()));
             collection.AddSingleton((s) => new IpcCallerPetNames(s.GetRequiredService<ILogger<IpcCallerPetNames>>(), pluginInterface,
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<MareMediator>()));
             collection.AddSingleton((s) => new IpcCallerBrio(s.GetRequiredService<ILogger<IpcCallerBrio>>(), pluginInterface,

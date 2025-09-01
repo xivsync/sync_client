@@ -81,9 +81,11 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                                  "If you want to use this plugin you will have to move your mods to Penumbra.", ImGuiColors.DalamudYellow);
             if (!_uiShared.DrawOtherPluginState()) return;
             ImGui.Separator();
-            if (ImGui.Button("Next##toAgreement"))
+            if (ImGui.Button("Next##toSetup"))
             {
                 _readFirstPage = true;
+                _configService.Current.AcceptedAgreement = true;
+                _configService.Save();
 #if !DEBUG
                 _timeoutTask = Task.Run(async () =>
                 {
