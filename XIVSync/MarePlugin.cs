@@ -5,6 +5,7 @@ using XIVSync.PlayerData.Services;
 using XIVSync.Services;
 using XIVSync.Services.Mediator;
 using XIVSync.Services.ServerConfiguration;
+using XIVSync.UI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -99,6 +100,8 @@ public class MarePlugin : MediatorSubscriberBase, IHostedService
 
         Mediator.StartQueueProcessing();
 
+
+
         return Task.CompletedTask;
     }
 
@@ -141,24 +144,28 @@ public class MarePlugin : MediatorSubscriberBase, IHostedService
             _runtimeServiceScope = _serviceScopeFactory.CreateScope();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<UiService>();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<CommandManagerService>();
+            
+            // Initialize background assets after services are ready
+
             if (!_mareConfigService.Current.HasValidSetup() || !_serverConfigurationManager.HasValidConfig())
             {
                 Mediator.Publish(new SwitchToIntroUiMessage());
                 return;
             }
+            
+            // Auto-open main UI for users who have completed setup
+            Mediator.Publish(new UiToggleMessage(typeof(CompactUi)));
             _runtimeServiceScope.ServiceProvider.GetRequiredService<CacheCreationService>();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<TransientResourceManager>();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<VisibleUserDataDistributor>();
             _runtimeServiceScope.ServiceProvider.GetRequiredService<NotificationService>();
 
-#if !DEBUG
             if (_mareConfigService.Current.LogLevel != LogLevel.Information)
             {
                 Mediator.Publish(new NotificationMessage("Abnormal Log Level",
                     $"Your log level is set to '{_mareConfigService.Current.LogLevel}' which is not recommended for normal usage. Set it to '{LogLevel.Information}' in \"Mare Settings -> Debug\" unless instructed otherwise.",
                     MareConfiguration.Models.NotificationType.Error, TimeSpan.FromSeconds(15000)));
             }
-#endif
         }
         catch (Exception ex)
         {

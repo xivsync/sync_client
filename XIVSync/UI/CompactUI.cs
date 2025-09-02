@@ -55,20 +55,73 @@ public class CompactUi : WindowMediatorSubscriberBase
     private string _lastAddedUserComment = string.Empty;
     private Vector2 _lastPosition = Vector2.One;
     private Vector2 _lastSize = Vector2.One;
-    private int _secretKeyIdx = -1;
+
     private bool _showModalForUserAddition;
     private float _transferPartHeight;
     private bool _wasOpen;
     private float _windowContentWidth;
     private readonly string _titleBarText;
     private bool _collapsed = false;
+    
+
 
     // theme state
     private ThemePalette _theme = new();          // active
     private ThemePalette _themeWorking = new();   // scratch while editing
     private string _selectedPreset = "Blue";
+    private string _lastSelectedPreset = "Blue";  // remember last choice
     private bool _showThemeInline = false;
-    private ThemePalette _themeBeforeEdit = new();
+    
+    public void ToggleThemeInline()
+    {
+        _showThemeInline = !_showThemeInline;
+        if (_showThemeInline)
+        {
+            // When opening theme editor, restore last selected preset
+            _selectedPreset = _lastSelectedPreset;
+            _themeWorking = Clone(_theme);
+        }
+    }
+
+    private bool IsThemeCustomized()
+    {
+        // Check if current theme matches any preset exactly
+        foreach (var preset in ThemePresets.Presets.Values)
+        {
+            if (ThemesEqual(_theme, preset))
+                return false;
+        }
+        return true;
+    }
+
+    private bool ThemesEqual(ThemePalette a, ThemePalette b)
+    {
+        return a.PanelBg.Equals(b.PanelBg) && a.PanelBorder.Equals(b.PanelBorder) &&
+               a.HeaderBg.Equals(b.HeaderBg) && a.Accent.Equals(b.Accent) &&
+               a.TextPrimary.Equals(b.TextPrimary) && a.TextSecondary.Equals(b.TextSecondary) &&
+               a.TextDisabled.Equals(b.TextDisabled) && a.Link.Equals(b.Link) &&
+               a.LinkHover.Equals(b.LinkHover) && a.Btn.Equals(b.Btn) &&
+               a.BtnHovered.Equals(b.BtnHovered) && a.BtnActive.Equals(b.BtnActive) &&
+               a.BtnText.Equals(b.BtnText) && a.BtnTextHovered.Equals(b.BtnTextHovered) &&
+               a.BtnTextActive.Equals(b.BtnTextActive) && a.TooltipBg.Equals(b.TooltipBg) &&
+               a.TooltipText.Equals(b.TooltipText);
+    }
+
+    private void DetectCurrentPreset()
+    {
+        // Check if current theme matches any preset
+        foreach (var kv in ThemePresets.Presets)
+        {
+            if (ThemesEqual(_theme, kv.Value))
+            {
+                _selectedPreset = kv.Key;
+                _lastSelectedPreset = kv.Key;
+                return;
+            }
+        }
+        // If no match found, it's custom - keep the last selected preset for reference
+    }
+
     private enum SurfaceBg { Popup, Window } // Window = modal/normal windows
 
     // --- Proximity Voice UI state ---
@@ -77,8 +130,7 @@ public class CompactUi : WindowMediatorSubscriberBase
     private bool _voiceDeafened;
     private float _voicePartHeight = -1f;
 
-    private double _nextUsersRefreshAt = 0;        // ImGui time (seconds)
-    private const double UsersRefreshInterval = 5; // refresh every 5s
+
 
 
 
@@ -88,13 +140,8 @@ public class CompactUi : WindowMediatorSubscriberBase
         PerformanceCollectorService performanceCollectorService, IpcManager ipcManager)
         : base(logger, mediator, "###MareSynchronosMainUI", performanceCollectorService)
     {
-#if DEBUG
-        var ver = Assembly.GetExecutingAssembly().GetName().Version!;
-        _titleBarText = $"XIVSync Dev Build ({ver.Major}.{ver.Minor}.{ver.Build})";
-#else
         var ver = Assembly.GetExecutingAssembly().GetName().Version!;
         _titleBarText = $"XIVSync ({ver.Major}.{ver.Minor}.{ver.Build})";
-#endif
 
         _uiSharedService = uiShared;
         _configService = configService;
@@ -107,12 +154,14 @@ public class CompactUi : WindowMediatorSubscriberBase
         _selectGroupForPairUi = selectTagForPairUi;
         _selectPairsForGroupUi = selectPairForTagUi;
         _ipcManager = ipcManager;
-        _tabMenu = new TopTabMenu(Mediator, _apiController, _pairManager, _uiSharedService);
+        _tabMenu = new TopTabMenu(_logger, Mediator, _apiController, _pairManager, _uiSharedService, _configService, this);
 
 
         if (_configService.Current?.Theme != null)
         {
             _theme = Clone(_configService.Current.Theme);
+            // Try to detect which preset this theme matches
+            DetectCurrentPreset();
         }
 
         _apiController.OnlineUsersChanged += _ =>
@@ -129,14 +178,14 @@ public class CompactUi : WindowMediatorSubscriberBase
             new TitleBarButton()
             {
                 Icon = FontAwesomeIcon.Cog,
-                Click = (msg) => Mediator.Publish(new UiToggleMessage(typeof(SettingsUi))),
+                Click = (msg) => Mediator.Publish(new UiToggleMessage(typeof(ModernSettingsUi))),
                 IconOffset = new(2,1),
                 ShowTooltip = () =>
                 {
                     using (new ThemedWindowScope(_theme, SurfaceBg.Popup))
                     {
                         ImGui.BeginTooltip();
-                        ImGui.TextColored(_theme.TextPrimary, "Open Mare Settings");
+                        ImGui.TextColored(_theme.BtnText, "Open Mare Settings");
                         ImGui.EndTooltip();
                     }
                 }
@@ -151,7 +200,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     using (new ThemedWindowScope(_theme, SurfaceBg.Popup))
                     {
                         ImGui.BeginTooltip();
-                        ImGui.TextColored(_theme.TextPrimary, "Open Mare Event Viewer");
+                        ImGui.TextColored(_theme.BtnText, "Open Mare Event Viewer");
                         ImGui.EndTooltip();
                     }
                 }
@@ -177,10 +226,18 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Collapsed path FIRST — no pushes before this.
         if (_collapsed)
         {
-            Flags |= ImGuiWindowFlags.NoTitleBar
+            // Base flags for collapsed state
+            Flags = ImGuiWindowFlags.NoTitleBar
                   | ImGuiWindowFlags.NoBackground
                   | ImGuiWindowFlags.NoScrollbar
                   | ImGuiWindowFlags.NoResize;
+            
+            // Apply pinning and click-through states
+            if (AllowPinning)
+                Flags |= ImGuiWindowFlags.NoMove;
+            
+            if (AllowClickthrough)
+                Flags |= ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.NoFocusOnAppearing;
 
             SizeConstraints = new() { MinimumSize = new(375, 40f), MaximumSize = new(375, 40f) };
             DrawCustomTitleBarOverlay(headerHeight);
@@ -190,11 +247,20 @@ public class CompactUi : WindowMediatorSubscriberBase
         // Themed normal path — ALL pushes live inside this scope.
         using (new GlobalThemeScope(_theme))
         {
-            Flags |= ImGuiWindowFlags.NoTitleBar
+            // Base flags
+            Flags = ImGuiWindowFlags.NoTitleBar
                   | ImGuiWindowFlags.NoBackground
+                  | ImGuiWindowFlags.NoScrollbar
                   | ImGuiWindowFlags.NoBringToFrontOnFocus;
+            
+            // Apply pinning and click-through states
+            if (AllowPinning)
+                Flags |= ImGuiWindowFlags.NoMove;
+            
+            if (AllowClickthrough)
+                Flags |= ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.NoFocusOnAppearing;
 
-            SizeConstraints = new() { MinimumSize = new(375, 600), MaximumSize = new(375, 2000) };
+            SizeConstraints = new() { MinimumSize = new(375, 700), MaximumSize = new(375, 2000) };
 
             DrawCustomTitleBarOverlay(headerHeight);
 
@@ -215,9 +281,14 @@ public class CompactUi : WindowMediatorSubscriberBase
             using var textPrimary = ImRaii.PushColor(ImGuiCol.Text, _theme.TextPrimary);
             using var textDisabled = ImRaii.PushColor(ImGuiCol.TextDisabled, _theme.TextDisabled);
 
+            // Apply click-through to main child window when enabled
+            var childFlags = ImGuiWindowFlags.NoScrollbar;
+            if (AllowClickthrough)
+                childFlags |= ImGuiWindowFlags.NoInputs;
+                
             ImGui.BeginChild("root-surface",
                 new Vector2(ImGui.GetContentRegionAvail().X, ImGui.GetContentRegionAvail().Y - 15f),
-                true);
+                true, childFlags);
 
             _windowContentWidth = UiSharedService.GetWindowContentRegionWidth();
 
@@ -278,9 +349,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    using (ImRaii.PushId("global-topmenu")) _tabMenu.Draw();
+                    using (ImRaii.PushId("global-topmenu")) _tabMenu.Draw(_theme);
 
-                    using (ImRaii.PushId("pairlist")) DrawPairs();
+                            using (ImRaii.PushId("pairlist")) DrawPairs();
                    // ImGui.Separator();
                     float pairlistEnd = ImGui.GetCursorPosY();
                    // using (ImRaii.PushId("transfers")) DrawTransfers();
@@ -320,12 +391,15 @@ public class CompactUi : WindowMediatorSubscriberBase
                     {
                         UiSharedService.TextWrapped($"You have successfully added {_lastAddedUser.UserData.AliasOrUID}. Set a local note for the user in the field below:");
                         ImGui.InputTextWithHint("##noteforuser", $"Note for {_lastAddedUser.UserData.AliasOrUID}", ref _lastAddedUserComment, 100);
-                        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Save, "Save Note"))
+                        using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
                         {
-                            _serverManager.SetNoteForUid(_lastAddedUser.UserData.UID, _lastAddedUserComment);
-                            _lastAddedUser = null;
-                            _lastAddedUserComment = string.Empty;
-                            _showModalForUserAddition = false;
+                            if (_uiSharedService.IconTextButton(FontAwesomeIcon.Save, "Save Note"))
+                            {
+                                _serverManager.SetNoteForUid(_lastAddedUser.UserData.UID, _lastAddedUserComment);
+                                _lastAddedUser = null;
+                                _lastAddedUserComment = string.Empty;
+                                _showModalForUserAddition = false;
+                            }
                         }
                     }
                     UiSharedService.SetScaledWindowSize(275);
@@ -342,6 +416,9 @@ public class CompactUi : WindowMediatorSubscriberBase
                 Mediator.Publish(new CompactUiChange(_lastSize, _lastPosition));
             }
 
+            // Draw user count overlay before ending the child
+            DrawUserCountOverlay();
+            
             ImGui.EndChild();
         } // GlobalThemeScope disposed here — no stray pops.
     }
@@ -414,142 +491,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         return (rowH * 2f) + padding;
     }
 
-    private void DrawServerStatus()
-    {
-        var buttonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Link);
-        var userCount = _apiController.OnlineUsers.ToString(CultureInfo.InvariantCulture);
-        var userSize = ImGui.CalcTextSize(userCount);
-        var textSize = ImGui.CalcTextSize("Users Online");
 
 
 
-#if DEBUG
-        string shardConnection = $"Shard: {_apiController.ServerInfo.ShardName}";
-#else
-        string shardConnection = string.Equals(_apiController.ServerInfo.ShardName, "Main", StringComparison.OrdinalIgnoreCase) ? string.Empty : $"Shard: {_apiController.ServerInfo.ShardName}";
-#endif
-        var shardTextSize = ImGui.CalcTextSize(shardConnection);
-        var printShard = !string.IsNullOrEmpty(_apiController.ServerInfo.ShardName) && shardConnection != string.Empty;
-
-        if (_apiController.ServerState is ServerState.Connected)
-        {       
-
-            ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth()) / 2 - (userSize.X + textSize.X) / 2 - ImGui.GetStyle().ItemSpacing.X / 2);
-            if (!printShard) ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(_theme.Accent, userCount);
-            ImGui.SameLine();
-            if (!printShard) ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Users Online");
-        }
-        else
-        {
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextColored(ImGuiColors.DalamudRed, "Not connected to any server");
-        }
-
-        if (printShard)
-        {
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y);
-            ImGui.SetCursorPosX((ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth()) / 2 - shardTextSize.X / 2);
-            ImGui.TextUnformatted(shardConnection);
-        }
-
-        ImGui.SameLine();
-        if (printShard)
-        {
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - ((userSize.Y + textSize.Y) / 2 + shardTextSize.Y) / 2 - ImGui.GetStyle().ItemSpacing.Y + buttonSize.Y / 2);
-        }
-        bool isConnectingOrConnected = _apiController.ServerState is ServerState.Connected or ServerState.Connecting or ServerState.Reconnecting;
-        var color = UiSharedService.GetBoolColor(!isConnectingOrConnected);
-        var connectedIcon = isConnectingOrConnected ? FontAwesomeIcon.Unlink : FontAwesomeIcon.Link;
-
-        ImGui.SameLine(ImGui.GetWindowContentRegionMin().X + UiSharedService.GetWindowContentRegionWidth() - buttonSize.X);
-        if (printShard)
-        {
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - ((userSize.Y + textSize.Y) / 2 + shardTextSize.Y) / 2 - ImGui.GetStyle().ItemSpacing.Y + buttonSize.Y / 2);
-        }
-
-        if (_apiController.ServerState is not (ServerState.Reconnecting or ServerState.Disconnecting))
-        {
-            using (ImRaii.PushColor(ImGuiCol.Text, color))
-            {
-                if (_uiSharedService.IconButton(connectedIcon))
-                {
-                    if (isConnectingOrConnected && !_serverManager.CurrentServer.FullPause)
-                    {
-                        _serverManager.CurrentServer.FullPause = true;
-                        _serverManager.Save();
-                    }
-                    else if (!isConnectingOrConnected && _serverManager.CurrentServer.FullPause)
-                    {
-                        _serverManager.CurrentServer.FullPause = false;
-                        _serverManager.Save();
-                    }
-
-                    _ = _apiController.CreateConnectionsAsync();
-                }
-            }
-
-            UiSharedService.AttachToolTip(isConnectingOrConnected ? "Disconnect from " + _serverManager.CurrentServer.ServerName : "Connect to " + _serverManager.CurrentServer.ServerName);
-        }
-    }
-
-    private void DrawTransfers()
-    {
-        var currentUploads = _fileTransferManager.CurrentUploads.ToList();
-        ImGui.AlignTextToFramePadding();
-        _uiSharedService.IconText(FontAwesomeIcon.Upload);
-        ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
-
-        if (currentUploads.Any())
-        {
-            var totalUploads = currentUploads.Count;
-
-            var doneUploads = currentUploads.Count(c => c.IsTransferred);
-            var totalUploaded = currentUploads.Sum(c => c.Transferred);
-            var totalToUpload = currentUploads.Sum(c => c.Total);
-
-            ImGui.TextUnformatted($"{doneUploads}/{totalUploads}");
-            var uploadText = $"({UiSharedService.ByteToString(totalUploaded)}/{UiSharedService.ByteToString(totalToUpload)})";
-            var textSize = ImGui.CalcTextSize(uploadText);
-            ImGui.SameLine(_windowContentWidth - textSize.X);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(uploadText);
-        }
-        else
-        {
-            ImGui.AlignTextToFramePadding();
-            using (ImRaii.PushColor(ImGuiCol.Text, _theme.TextSecondary))
-                ImGui.TextUnformatted("No uploads in progress");
-        }
-
-        var currentDownloads = _currentDownloads.SelectMany(d => d.Value.Values).ToList();
-        ImGui.AlignTextToFramePadding();
-        _uiSharedService.IconText(FontAwesomeIcon.Download);
-        ImGui.SameLine(35 * ImGuiHelpers.GlobalScale);
-
-        if (currentDownloads.Any())
-        {
-            var totalDownloads = currentDownloads.Sum(c => c.TotalFiles);
-            var doneDownloads = currentDownloads.Sum(c => c.TransferredFiles);
-            var totalDownloaded = currentDownloads.Sum(c => c.TransferredBytes);
-            var totalToDownload = currentDownloads.Sum(c => c.TotalBytes);
-
-            ImGui.TextUnformatted($"{doneDownloads}/{totalDownloads}");
-            var downloadText =
-                $"({UiSharedService.ByteToString(totalDownloaded)}/{UiSharedService.ByteToString(totalToDownload)})";
-            var textSize = ImGui.CalcTextSize(downloadText);
-            ImGui.SameLine(_windowContentWidth - textSize.X);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(downloadText);
-        }
-        else
-        {
-            ImGui.AlignTextToFramePadding();
-            using (ImRaii.PushColor(ImGuiCol.Text, _theme.TextSecondary))
-                ImGui.TextUnformatted("No downloads in progress");
-        }
-    }
 
     private void DrawUIDHeader()
     {
@@ -558,18 +502,20 @@ public class CompactUi : WindowMediatorSubscriberBase
         using (_uiSharedService.UidFont.Push())
             ImGui.TextColored(_theme.Accent, uidText);
 
+
+
         if (_apiController.ServerState is ServerState.Connected)
         {
             if (ImGui.IsItemClicked())
                 ImGui.SetClipboardText(_apiController.DisplayName);
-            UiSharedService.AttachToolTip("Click to copy");
+            ThemedToolTip("Click to copy");
 
             if (!string.Equals(_apiController.DisplayName, _apiController.UID, StringComparison.Ordinal))
             {
                 ImGui.TextColored(_theme.Accent, _apiController.UID);
                 if (ImGui.IsItemClicked())
                     ImGui.SetClipboardText(_apiController.UID);
-                UiSharedService.AttachToolTip("Click to copy");
+                ThemedToolTip("Click to copy");
             }
         }
         else
@@ -578,6 +524,51 @@ public class CompactUi : WindowMediatorSubscriberBase
         }
 
 
+    }
+
+    private void DrawFloatingResetButtonInToolbar(float overlayX, float overlayY, float spacing)
+    {
+        // Calculate position for the reset button (before collapse button in toolbar)
+        var buttonSize = _uiSharedService.GetIconButtonSize(FontAwesomeIcon.Undo);
+        
+        // Position the button to the left of the collapse button in the toolbar
+        var buttonPos = new Vector2(
+            overlayX - buttonSize.X - spacing, // Position to the left of the toolbar
+            overlayY
+        );
+        
+        ImGui.SetNextWindowPos(buttonPos);
+        ImGui.SetNextWindowBgAlpha(0f);
+        
+        var floatingFlags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                           ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings |
+                           ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
+                           ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking;
+        // Importantly, do NOT add NoInputs flag so this remains clickable
+        
+        if (ImGui.Begin("##xivsync-reset-button", floatingFlags))
+        {
+            // Apply same styling as the toolbar
+            ImGui.PushStyleColor(ImGuiCol.Button, _theme.Btn);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, _theme.BtnHovered);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, _theme.BtnActive);
+            ImGui.PushStyleColor(ImGuiCol.Text, _theme.BtnText);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 6f);
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(6f, 3f));
+            
+            if (_uiSharedService.IconButton(FontAwesomeIcon.Undo))
+            {
+                // Reset click-through and pin window, clear filters
+                AllowClickthrough = false;
+                AllowPinning = false;
+                _tabMenu.ClearUserFilter();
+            }
+            ThemedToolTip("Reset window settings");
+            
+            ImGui.PopStyleVar(2);
+            ImGui.PopStyleColor(4);
+        }
+        ImGui.End();
     }
 
     private IEnumerable<IDrawFolder> GetDrawFolders()
@@ -827,7 +818,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                        new Vector2(headerMax.X, headerMax.Y),
                        ImGui.ColorConvertFloat4ToU32(_theme.Accent));
 
-            int buttonCount = 5; // +1 for link/unlink
+            int buttonCount = 3; // collapse, link/unlink, close
             float buttonsW = (btnSide * buttonCount) + (spacing * (buttonCount - 1));
             float btnStartX = headerMax.X - rightPad - buttonsW;
             float btnStartY = headerMin.Y + (headerH - btnH) * 0.5f;
@@ -850,6 +841,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.PushStyleColor(ImGuiCol.Button, _theme.Btn);
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, _theme.BtnHovered);
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, _theme.BtnActive);
+            ImGui.PushStyleColor(ImGuiCol.Text, _theme.BtnText);
             ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 6f);
             ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(6f, 3f));
 
@@ -857,15 +849,14 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
             var collapseIcon = _collapsed ? FontAwesomeIcon.AngleDown : FontAwesomeIcon.AngleUp;
-            if (_uiSharedService.IconButton(collapseIcon)) _collapsed = !_collapsed;
-            UiSharedService.AttachToolTip(_collapsed ? "Expand" : "Collapse");
+            using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
+            {
+                if (_uiSharedService.IconButton(collapseIcon)) _collapsed = !_collapsed;
+            }
+            ThemedToolTip(_collapsed ? "Expand" : "Collapse");
             x += btnSide + spacing;
 
-            ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
-                Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
-            UiSharedService.AttachToolTip("Open Settings");
-            x += btnSide + spacing;
+            // Settings button removed - moved to user menu
 
             //ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
             //if (_uiSharedService.IconButton(FontAwesomeIcon.Book))
@@ -894,18 +885,21 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 if (isBusy) ImGui.EndDisabled();
             }
-            UiSharedService.AttachToolTip(isConnectingOrConnected
+            ThemedToolTip(isConnectingOrConnected
                 ? "Disconnect from " + _serverManager.CurrentServer.ServerName
                 : "Connect to " + _serverManager.CurrentServer.ServerName);
             x += btnSide + spacing;
 
             ImGui.SetCursorScreenPos(new Vector2(x, btnStartY));
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
-                IsOpen = false;
-            UiSharedService.AttachToolTip("Close");
+            using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
+            {
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
+                    IsOpen = false;
+            }
+            ThemedToolTip("Close");
 
             ImGui.PopStyleVar(2);
-            ImGui.PopStyleColor(3);
+            ImGui.PopStyleColor(4);
         }
         else
         {
@@ -913,7 +907,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             float spacing = 6f * ImGuiHelpers.GlobalScale;
             float btnSide = 22f * ImGuiHelpers.GlobalScale;
-            float rightPad = ImGui.GetStyle().WindowPadding.X + 20f * ImGuiHelpers.GlobalScale;
+            float rightPad = ImGui.GetStyle().WindowPadding.X + 10.00f * ImGuiHelpers.GlobalScale;
 
             var style = ImGui.GetStyle();
             float topOffset = style.FramePadding.Y + style.ItemSpacing.Y + ImGuiHelpers.GlobalScale;
@@ -923,46 +917,47 @@ public class CompactUi : WindowMediatorSubscriberBase
             var crMax = ImGui.GetWindowContentRegionMax();
 
             float stripWidth = (btnSide * 6f) + spacing * 4f; // +1 for link/unlink
-            float overlayX = winPos.X + crMax.X - rightPad - stripWidth;
+            float overlayX = winPos.X + crMax.X - stripWidth + 40f; // Move 2px further right to be truly flush
             float overlayY = winPos.Y + crMin.Y + topOffset;
 
             ImGui.SetNextWindowPos(new Vector2(overlayX, overlayY), ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0f);
-            ImGui.Begin("##xivsync-floating-controls",
-                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+            // Apply click-through to floating controls as well
+            var floatingFlags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
                 ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings |
                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
-                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking);
+                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking;
+            
+            if (AllowClickthrough)
+                floatingFlags |= ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.NoFocusOnAppearing;
+                
+            ImGui.Begin("##xivsync-floating-controls", floatingFlags);
 
             ImGui.PushStyleColor(ImGuiCol.Button, _theme.Btn);
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, _theme.BtnHovered);
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, _theme.BtnActive);
+            ImGui.PushStyleColor(ImGuiCol.Text, _theme.BtnText);
             ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 6f);
             ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(6f, 3f));
 
-            if (_uiSharedService.IconButton(collapseIcon))
-                _collapsed = !_collapsed;
-            UiSharedService.AttachToolTip(_collapsed ? "Expand" : "Collapse");
+
+
+            using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
+            {
+                if (_uiSharedService.IconButton(collapseIcon))
+                    _collapsed = !_collapsed;
+            }
+            ThemedToolTip(_collapsed ? "Expand" : "Collapse");
             ImGui.SameLine(0, spacing);
 
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
-                Mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
-            UiSharedService.AttachToolTip("Open Settings");
-            ImGui.SameLine(0, spacing);
+            // Settings button removed - moved to user menu
 
             //if (_uiSharedService.IconButton(FontAwesomeIcon.Book))
             //    Mediator.Publish(new UiToggleMessage(typeof(EventViewerUI)));
             //UiSharedService.AttachToolTip("Open Event Viewer");
             //ImGui.SameLine(0, spacing);
 
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Palette))
-            {
-                _themeBeforeEdit = Clone(_theme);
-                _themeWorking = Clone(_theme);
-                _showThemeInline = true;
-            }
-            UiSharedService.AttachToolTip("Customize Theme");
-            ImGui.SameLine(0, spacing);
+            // Customize Theme button removed - moved to user menu
 
             // Connect/Disconnect button
             using (ImRaii.PushColor(ImGuiCol.Text, linkColor))
@@ -984,19 +979,28 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 if (isBusy) ImGui.EndDisabled();
             }
-            UiSharedService.AttachToolTip(isConnectingOrConnected
+            ThemedToolTip(isConnectingOrConnected
                 ? "Disconnect from " + _serverManager.CurrentServer.ServerName
                 : "Connect to " + _serverManager.CurrentServer.ServerName);
             ImGui.SameLine(0, spacing);
 
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
-                IsOpen = false;
-            UiSharedService.AttachToolTip("Close");
+            using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
+            {
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Times))
+                    IsOpen = false;
+            }
+            ThemedToolTip("Close");
 
             ImGui.PopStyleVar(2);
-            ImGui.PopStyleColor(3);
+            ImGui.PopStyleColor(4);
 
             ImGui.End();
+            
+            // Draw reset button as separate window positioned before collapse in the toolbar
+            if (_apiController.ServerState is ServerState.Connected && AllowClickthrough)
+            {
+                DrawFloatingResetButtonInToolbar(overlayX, overlayY, spacing);
+            }
         }
     }
 
@@ -1006,20 +1010,32 @@ public class CompactUi : WindowMediatorSubscriberBase
         ImGui.TextColored(_theme.Accent, "Theme");
         ImGui.SameLine();
         using (ImRaii.PushColor(ImGuiCol.Text, _theme.TextSecondary))
-            ImGui.TextUnformatted("(preview changes live, then Save)");
+            ImGui.TextUnformatted("(changes preview automatically)");
 
         ImGui.Separator();
 
         ImGui.TextUnformatted("Preset");
         ImGui.SameLine();
         using (ImRaii.PushStyle(ImGuiStyleVar.PopupRounding, 8f))
-        using (ImRaii.PushColor(ImGuiCol.PopupBg, _theme.PanelBg))
+        using (ImRaii.PushColor(ImGuiCol.PopupBg, _theme.Btn))
         using (ImRaii.PushColor(ImGuiCol.Border, _theme.PanelBorder))
         using (ImRaii.PushColor(ImGuiCol.ScrollbarBg, _theme.Btn))
         using (ImRaii.PushColor(ImGuiCol.ScrollbarGrab, _theme.BtnHovered))
         using (ImRaii.PushColor(ImGuiCol.ScrollbarGrabHovered, _theme.Accent))
         using (ImRaii.PushColor(ImGuiCol.ScrollbarGrabActive, _theme.BtnActive))
-            if (ImGui.BeginCombo("##theme-preset-inline", _selectedPreset))
+        using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
+        // Apply button colors to the dropdown/combo
+        using (ImRaii.PushColor(ImGuiCol.FrameBg, _theme.Btn))
+        using (ImRaii.PushColor(ImGuiCol.FrameBgHovered, _theme.BtnHovered))
+        using (ImRaii.PushColor(ImGuiCol.FrameBgActive, _theme.BtnActive))
+        using (ImRaii.PushColor(ImGuiCol.Button, _theme.Btn))
+        using (ImRaii.PushColor(ImGuiCol.ButtonHovered, _theme.BtnHovered))
+        using (ImRaii.PushColor(ImGuiCol.ButtonActive, _theme.BtnActive))
+        // Apply text colors for different states
+        using (ImRaii.PushColor(ImGuiCol.TextSelectedBg, _theme.BtnActive))
+        {
+            string displayName = IsThemeCustomized() ? "Custom" : _selectedPreset;
+            if (ImGui.BeginCombo("##theme-preset-inline", displayName))
             {
                 foreach (var kv in ThemePresets.Presets)
                 {
@@ -1027,6 +1043,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                     if (ImGui.Selectable(kv.Key, sel))
                     {
                         _selectedPreset = kv.Key;
+                        _lastSelectedPreset = kv.Key; // Remember this choice
                         _themeWorking = Clone(kv.Value);
                         _theme = Clone(_themeWorking); // auto-preview
                     }
@@ -1034,6 +1051,7 @@ public class CompactUi : WindowMediatorSubscriberBase
                 }
                 ImGui.EndCombo();
             }
+        }
 
         ImGui.Separator();
 
@@ -1045,6 +1063,9 @@ public class CompactUi : WindowMediatorSubscriberBase
         DrawColorRow("Button", () => _themeWorking.Btn, v => _themeWorking.Btn = v);
         DrawColorRow("Button Hovered", () => _themeWorking.BtnHovered, v => _themeWorking.BtnHovered = v);
         DrawColorRow("Button Active", () => _themeWorking.BtnActive, v => _themeWorking.BtnActive = v);
+        DrawColorRow("Button Text", () => _themeWorking.BtnText, v => _themeWorking.BtnText = v);
+        DrawColorRow("Button Text Hovered", () => _themeWorking.BtnTextHovered, v => _themeWorking.BtnTextHovered = v);
+        DrawColorRow("Button Text Active", () => _themeWorking.BtnTextActive, v => _themeWorking.BtnTextActive = v);
 
         DrawColorRow("Text Primary", () => _themeWorking.TextPrimary, v => _themeWorking.TextPrimary = v);
         DrawColorRow("Text Secondary", () => _themeWorking.TextSecondary, v => _themeWorking.TextSecondary = v);
@@ -1053,31 +1074,38 @@ public class CompactUi : WindowMediatorSubscriberBase
         DrawColorRow("Link", () => _themeWorking.Link, v => _themeWorking.Link = v);
         DrawColorRow("Link Hover", () => _themeWorking.LinkHover, v => _themeWorking.LinkHover = v);
 
+        DrawColorRow("Tooltip Background", () => _themeWorking.TooltipBg, v => _themeWorking.TooltipBg = v);
+        DrawColorRow("Tooltip Text", () => _themeWorking.TooltipText, v => _themeWorking.TooltipText = v);
 
         ImGui.Separator();
 
-        if (ImGui.Button("Preview"))
-            _theme = Clone(_themeWorking);
-
-        ImGui.SameLine();
-        if (ImGui.Button("Reset to Preset"))
-            _themeWorking = ThemePresets.Presets.TryGetValue(_selectedPreset, out var p) ? Clone(p) : new ThemePalette();
-
-        ImGui.SameLine();
-        if (ImGui.Button("Cancel"))
-            _showThemeInline = false;
-
-        ImGui.SameLine();
-        if (ImGui.Button("Save"))
+        using (ImRaii.PushColor(ImGuiCol.Text, _theme.BtnText))
         {
-            _theme = Clone(_themeWorking);
-            PersistTheme(_theme);
-            _showThemeInline = false;
+            if (ImGui.Button("Reset to Preset"))
+            {
+                _themeWorking = ThemePresets.Presets.TryGetValue(_selectedPreset, out var p) ? Clone(p) : new ThemePalette();
+                _theme = Clone(_themeWorking); // Auto-preview the reset
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel"))
+                _showThemeInline = false;
+
+            ImGui.SameLine();
+            if (ImGui.Button("Save"))
+            {
+                _theme = Clone(_themeWorking);
+                PersistTheme(_theme);
+                _showThemeInline = false;
+            }
         }
 
         ImGui.Spacing();
-        using (ImRaii.PushColor(ImGuiCol.Text, _theme.TextSecondary))
-            ImGui.TextUnformatted("Tip: Click Preview to try colors without saving.");
+    }
+
+    private void ThemedToolTip(string text)
+    {
+        UiSharedService.AttachThemedToolTip(text, _theme);
     }
 
     private static ThemePalette Clone(ThemePalette p) => new ThemePalette
@@ -1096,6 +1124,12 @@ public class CompactUi : WindowMediatorSubscriberBase
         Btn = p.Btn,
         BtnHovered = p.BtnHovered,
         BtnActive = p.BtnActive,
+        BtnText = p.BtnText,
+        BtnTextHovered = p.BtnTextHovered,
+        BtnTextActive = p.BtnTextActive,
+
+        TooltipBg = p.TooltipBg,
+        TooltipText = p.TooltipText,
     };
 
     private void PersistTheme(ThemePalette theme)
@@ -1114,7 +1148,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 
 
 
-    private static void DrawColorRow(string label, Func<Vector4> get, Action<Vector4> set)
+    private void DrawColorRow(string label, Func<Vector4> get, Action<Vector4> set)
     {
         float labelWidth = 200f * ImGuiHelpers.GlobalScale;
         float swatchSize = 22f * ImGuiHelpers.GlobalScale;
@@ -1144,6 +1178,9 @@ public class CompactUi : WindowMediatorSubscriberBase
 
             // push updated color back to your theme
             set(color);
+            
+            // Auto-preview the changes
+            _theme = Clone(_themeWorking);
 
             ImGui.EndPopup();
         }
@@ -1332,7 +1369,7 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.TextColored(t.Accent, "Proximity Voice");
             ImGui.SameLine();
             ImGui.Checkbox(" Enable", ref _voiceEnabled);
-            UiSharedService.AttachToolTip("Toggle proximity voice on/off");
+            ThemedToolTip("Toggle proximity voice on/off");
         }
 
         // Right-aligned controls
@@ -1347,45 +1384,90 @@ public class CompactUi : WindowMediatorSubscriberBase
         {
             // Mute / Unmute
             var micIcon = _voiceMuted ? FontAwesomeIcon.MicrophoneSlash : FontAwesomeIcon.Microphone;
-            if (_voiceMuted)
+            using (ImRaii.PushColor(ImGuiCol.Text, t.BtnText))
             {
-                using (ImRaii.PushColor(ImGuiCol.Button, t.BtnActive))
+                if (_voiceMuted)
+                {
+                    using (ImRaii.PushColor(ImGuiCol.Button, t.BtnActive))
+                        if (_uiSharedService.IconButton(micIcon)) _voiceMuted = !_voiceMuted;
+                }
+                else
+                {
                     if (_uiSharedService.IconButton(micIcon)) _voiceMuted = !_voiceMuted;
+                }
             }
-            else
-            {
-                if (_uiSharedService.IconButton(micIcon)) _voiceMuted = !_voiceMuted;
-            }
-            UiSharedService.AttachToolTip(_voiceMuted ? "Unmute" : "Mute");
+            ThemedToolTip(_voiceMuted ? "Unmute" : "Mute");
 
             ImGui.SameLine(0, spacing);
 
             // Deafen / Undeafen
             // (choose whichever icon mapping you prefer)
             var deafIcon = _voiceDeafened ? FontAwesomeIcon.VolumeUp : FontAwesomeIcon.VolumeMute;
-            if (_voiceDeafened)
+            using (ImRaii.PushColor(ImGuiCol.Text, t.BtnText))
             {
-                using (ImRaii.PushColor(ImGuiCol.Button, t.BtnActive))
+                if (_voiceDeafened)
+                {
+                    using (ImRaii.PushColor(ImGuiCol.Button, t.BtnActive))
+                        if (_uiSharedService.IconButton(deafIcon)) _voiceDeafened = !_voiceDeafened;
+                }
+                else
+                {
                     if (_uiSharedService.IconButton(deafIcon)) _voiceDeafened = !_voiceDeafened;
+                }
             }
-            else
-            {
-                if (_uiSharedService.IconButton(deafIcon)) _voiceDeafened = !_voiceDeafened;
-            }
-            UiSharedService.AttachToolTip(_voiceDeafened ? "Undeafen" : "Deafen");
+            ThemedToolTip(_voiceDeafened ? "Undeafen" : "Deafen");
 
             ImGui.SameLine(0, spacing);
 
             // Configure
-            if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
+            using (ImRaii.PushColor(ImGuiCol.Text, t.BtnText))
             {
-                // TODO: open your voice settings modal/window
-                // Mediator.Publish(new UiToggleMessage(typeof(VoiceSettingsUi)));
+                if (_uiSharedService.IconButton(FontAwesomeIcon.Cog))
+                {
+                    // TODO: open your voice settings modal/window
+                    // Mediator.Publish(new UiToggleMessage(typeof(VoiceSettingsUi)));
+                }
             }
-            UiSharedService.AttachToolTip("Configure proximity voice");
+            ThemedToolTip("Configure proximity voice");
         }
 
         ImGui.EndChild();
+    }
+
+    private void DrawUserCountOverlay()
+    {
+        if (_apiController.ServerState is not ServerState.Connected)
+            return;
+            
+        // Hide users online when theme editor is active
+        if (_showThemeInline)
+            return;
+
+        // Get user count and calculate text sizes
+        var userCount = _apiController.OnlineUsers.ToString(CultureInfo.InvariantCulture);
+        var userCountText = $"{userCount} Users Online";
+        var textSize = ImGui.CalcTextSize(userCountText);
+        
+        // Position text at bottom center of the child content area
+        var childPos = ImGui.GetWindowPos();
+        var childSize = ImGui.GetWindowSize();
+        var textPos = new Vector2(
+            childPos.X + (childSize.X - textSize.X) / 2f,
+            childPos.Y + childSize.Y - textSize.Y - 15f // 15px from bottom (moved down another 10px)
+        );
+        
+        // Draw text directly without background or border
+        var drawList = ImGui.GetWindowDrawList();
+        
+        // Draw user count number in accent color
+        var accentColor = ImGui.ColorConvertFloat4ToU32(_theme.Accent);
+        var userCountSize = ImGui.CalcTextSize(userCount);
+        drawList.AddText(textPos, accentColor, userCount);
+        
+        // Draw "Users Online" text in primary color next to the number
+        var textColor = ImGui.ColorConvertFloat4ToU32(_theme.TextPrimary);
+        var remainingTextPos = new Vector2(textPos.X + userCountSize.X, textPos.Y);
+        drawList.AddText(remainingTextPos, textColor, " Users Online");
     }
 
 
@@ -1395,7 +1477,7 @@ public class CompactUi : WindowMediatorSubscriberBase
 public sealed class ThemePalette
 {
     [JsonConverter(typeof(Vector4JsonConverter))]
-    public Vector4 PanelBg { get; set; } = new(0.07f, 0.08f, 0.12f, 0.98f);
+    public Vector4 PanelBg { get; set; } = new(0.07f, 0.08f, 0.12f, 0.80f);
 
     [JsonConverter(typeof(Vector4JsonConverter))]
     public Vector4 PanelBorder { get; set; } = new(0.25f, 0.45f, 0.95f, 1.00f);
@@ -1429,6 +1511,23 @@ public sealed class ThemePalette
 
     [JsonConverter(typeof(Vector4JsonConverter))]
     public Vector4 BtnActive { get; set; } = new(0.20f, 0.35f, 0.75f, 1.00f);
+
+    // Button Text/Icon Colors
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 BtnText { get; set; } = new(0.85f, 0.90f, 1.00f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 BtnTextHovered { get; set; } = new(1.00f, 1.00f, 1.00f, 1.00f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 BtnTextActive { get; set; } = new(0.95f, 0.98f, 1.00f, 1.00f);
+
+    // Tooltip Colors
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 TooltipBg { get; set; } = new(0.05f, 0.06f, 0.10f, 0.95f);
+
+    [JsonConverter(typeof(Vector4JsonConverter))]
+    public Vector4 TooltipText { get; set; } = new(0.90f, 0.95f, 1.00f, 1.00f);
 }
 public sealed class Vector4JsonConverter : JsonConverter<Vector4>
 {

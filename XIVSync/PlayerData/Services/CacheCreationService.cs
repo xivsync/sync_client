@@ -1,4 +1,5 @@
 ﻿using XIVSync.API.Data.Enum;
+using XIVSync.MareConfiguration;
 using XIVSync.PlayerData.Data;
 using XIVSync.PlayerData.Factories;
 using XIVSync.PlayerData.Handlers;
@@ -13,6 +14,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private readonly SemaphoreSlim _cacheCreateLock = new(1);
     private readonly HashSet<ObjectKind> _cachesToCreate = [];
     private readonly PlayerDataFactory _characterDataFactory;
+    private readonly MareConfigService _mareConfigService;
     private readonly HashSet<ObjectKind> _currentlyCreating = [];
     private readonly HashSet<ObjectKind> _debouncedObjectCache = [];
     private readonly CharacterData _playerData = new();
@@ -24,9 +26,10 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
     private bool _isZoning = false;
 
     public CacheCreationService(ILogger<CacheCreationService> logger, MareMediator mediator, GameObjectHandlerFactory gameObjectHandlerFactory,
-        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil) : base(logger, mediator)
+        PlayerDataFactory characterDataFactory, DalamudUtilService dalamudUtil, MareConfigService mareConfigService) : base(logger, mediator)
     {
         _characterDataFactory = characterDataFactory;
+        _mareConfigService = mareConfigService;
 
         Mediator.Subscribe<ZoneSwitchStartMessage>(this, (msg) => _isZoning = true);
         Mediator.Subscribe<ZoneSwitchEndMessage>(this, (msg) => _isZoning = false);
@@ -141,6 +144,12 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
             AddCacheToCreate(ObjectKind.Companion);
         });
 
+        Mediator.Subscribe<SelfMuteSettingChangedMessage>(this, (msg) =>
+        {
+            Logger.LogInformation("[Self-Mute] Cache service received message, triggering player data recreation");
+            AddCacheToCreate(ObjectKind.Player);
+        });
+
         Mediator.Subscribe<FrameworkUpdateMessage>(this, (msg) => ProcessCacheCreation());
     }
 
@@ -225,7 +234,7 @@ public sealed class CacheCreationService : DisposableMediatorSubscriberBase
                     _playerData.SetFragment(kvp.Key, kvp.Value);
                 }
 
-                Mediator.Publish(new CharacterDataCreatedMessage(_playerData.ToAPI()));
+                Mediator.Publish(new CharacterDataCreatedMessage(_playerData.ToAPI(_mareConfigService.Current.MuteOwnSounds)));
                 _currentlyCreating.Clear();
             }
             catch (OperationCanceledException)

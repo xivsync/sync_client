@@ -90,7 +90,8 @@ public sealed class CharacterAnalyzer : MediatorSubscriberBase, IDisposable
 
     public void Dispose()
     {
-        _analysisCts.CancelDispose();
+        _analysisCts?.CancelDispose();
+        _baseAnalysisCts?.CancelDispose();
     }
 
     private async Task BaseAnalysis(CharacterData charaData, CancellationToken token)

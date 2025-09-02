@@ -29,6 +29,7 @@ public class MareConfig : IMareConfiguration
     public bool OpenGposeImportOnGposeStart { get; set; } = false;
     public bool OpenPopupOnAdd { get; set; } = true;
     public int ParallelDownloads { get; set; } = 10;
+    public int ParallelUploads { get; set; } = 3;
     public int DownloadSpeedLimitInBytes { get; set; } = 0;
     public DownloadSpeeds DownloadSpeedType { get; set; } = DownloadSpeeds.MBps;
     public bool PreferNotesOverNamesForVisible { get; set; } = false;
@@ -61,5 +62,23 @@ public class MareConfig : IMareConfiguration
     public NotificationLocation WarningNotification { get; set; } = NotificationLocation.Both;
     public bool UseFocusTarget { get; set; } = false;
     public ThemePalette? Theme { get; set; } = null; // null = use defaults
+
+    // Log Viewer Settings
+    public bool ShowTraceLogs { get; set; } = true;
+    public bool ShowDebugLogs { get; set; } = true;
+    public bool ShowInfoLogs { get; set; } = true;
+    public bool ShowWarningLogs { get; set; } = true;
+    public bool ShowErrorLogs { get; set; } = true;
+    public bool LogViewerAutoScroll { get; set; } = true;
+
+    // Self Sound Control
+    public bool MuteOwnSounds { get; set; } = false;
+    public bool MuteOwnSoundsLocally { get; set; } = false;
+
+    // Modern Theme System
+    public string ModernThemeName { get; set; } = "default";
+    public float ModernThemeOpacity { get; set; } = 0.40f;
+    public string ModernBackgroundPreset { get; set; } = "aether";
+    public string ModernBackgroundImagePath { get; set; } = string.Empty;
 
 }

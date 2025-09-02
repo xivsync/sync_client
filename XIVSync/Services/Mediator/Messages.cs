@@ -16,7 +16,7 @@ namespace XIVSync.Services.Mediator;
 #pragma warning disable S2094
 public record SwitchToIntroUiMessage : MessageBase;
 public record SwitchToMainUiMessage : MessageBase;
-public record OpenSettingsUiMessage : MessageBase;
+public record OpenModernSettingsUiMessage : MessageBase;
 public record DalamudLoginMessage : MessageBase;
 public record DalamudLogoutMessage : MessageBase;
 public record PriorityFrameworkUpdateMessage : SameThreadMessage;
@@ -52,6 +52,8 @@ public record NotificationMessage
     (string Title, string Message, NotificationType Type, TimeSpan? TimeShownOnScreen = null) : MessageBase;
 public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
+public record SelfMuteSettingChangedMessage : SameThreadMessage;
+public record LocalSelfMuteSettingChangedMessage : SameThreadMessage;
 public record CharacterDataCreatedMessage(CharacterData CharacterData) : SameThreadMessage;
 public record CharacterDataAnalyzedMessage : MessageBase;
 public record PenumbraStartRedrawMessage(IntPtr Address) : MessageBase;

@@ -98,9 +98,26 @@ public class ServerConfigurationManager
         }
         hasMulti = false;
 
-        var charaName = _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult();
-        var worldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult();
-        var cid = _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult();
+        string charaName;
+        ushort worldId;
+        ulong cid;
+        
+        try
+        {
+            var timeout = TimeSpan.FromSeconds(2);
+            charaName = _dalamudUtil.GetPlayerNameAsync().Wait(timeout) ? _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult() : "--";
+            worldId = _dalamudUtil.GetHomeWorldIdAsync().Wait(timeout) ? (ushort)_dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult() : (ushort)0;
+            cid = _dalamudUtil.GetCIDAsync().Wait(timeout) ? _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult() : 0UL;
+        }
+        catch (Exception ex)
+        {
+
+            charaName = "--";
+            worldId = 0;
+            cid = 0UL;
+        }
+
+
 
         var auth = currentServer.Authentications.FindAll(f => string.Equals(f.CharacterName, charaName) && f.WorldId == worldId);
         if (auth.Count >= 2)
@@ -145,9 +162,26 @@ public class ServerConfigurationManager
         }
         hasMulti = false;
 
-        var charaName = _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult();
-        var worldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult();
-        var cid = _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult();
+        string charaName;
+        ushort worldId;
+        ulong cid;
+        
+        try
+        {
+            var timeout = TimeSpan.FromSeconds(2);
+            charaName = _dalamudUtil.GetPlayerNameAsync().Wait(timeout) ? _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult() : "--";
+            worldId = _dalamudUtil.GetHomeWorldIdAsync().Wait(timeout) ? (ushort)_dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult() : (ushort)0;
+            cid = _dalamudUtil.GetCIDAsync().Wait(timeout) ? _dalamudUtil.GetCIDAsync().GetAwaiter().GetResult() : 0UL;
+        }
+        catch (Exception ex)
+        {
+
+            charaName = "--";
+            worldId = 0;
+            cid = 0UL;
+        }
+
+
         if (!currentServer.Authentications.Any() && currentServer.SecretKeys.Any())
         {
             currentServer.Authentications.Add(new Authentication()

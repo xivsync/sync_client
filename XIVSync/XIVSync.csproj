@@ -2,8 +2,13 @@
 <Project Sdk="Dalamud.NET.Sdk/13.0.0">
   <PropertyGroup>
     <Authors></Authors>
+    
     <Company></Company>
-    <Version>1.27.0</Version>
+    <VersionMajor>1</VersionMajor>
+    <VersionMinor>27</VersionMinor>
+    <VersionPatch>4</VersionPatch>
+    <VersionBuild>80</VersionBuild>
+    <Version>$(VersionMajor).$(VersionMinor).$(VersionPatch).$(VersionBuild)</Version>
     <Description></Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/xivsync/sync_client</PackageProjectUrl>
@@ -76,5 +81,15 @@
   <ItemGroup>
     <None Include="..\.editorconfig" Link=".editorconfig" />
   </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <!-- Copy DLL to Windows filesystem for Dalamud file watching -->
+    <Exec Command="&quot;$(ProjectDir)..\copy_to_windows.bat&quot; &quot;$(TargetPath)&quot;" />
+    
+    <!-- Production build automation (Release builds only) -->
+    <Exec Condition="'$(Configuration)' == 'Release'" 
+          Command="powershell.exe -ExecutionPolicy Bypass -File &quot;$(ProjectDir)..\production_build.ps1&quot; &quot;$(OutputPath)&quot; &quot;$(ProjectDir)&quot; &quot;$(Configuration)&quot; &quot;$(VersionMajor)&quot; &quot;$(VersionMinor)&quot; &quot;$(VersionPatch)&quot; &quot;$(VersionBuild)&quot;" 
+          ContinueOnError="false" />
+  </Target>
 
 </Project>

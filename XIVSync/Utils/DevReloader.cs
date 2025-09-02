@@ -31,6 +31,9 @@ namespace XIVSync.Utils
                 var dir = Path.GetDirectoryName(loadedDllPath);
                 var file = Path.GetFileName(loadedDllPath);
 
+                // Debug: Log the path being watched
+                System.Diagnostics.Debug.WriteLine($"[DevAutoReloader] Watching: {loadedDllPath}");
+
                 if (!string.IsNullOrEmpty(dir) && !string.IsNullOrEmpty(file))
                 {
                     watcher = new FileSystemWatcher(dir, file)

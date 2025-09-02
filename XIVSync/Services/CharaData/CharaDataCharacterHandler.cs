@@ -29,7 +29,7 @@ public sealed class CharaDataCharacterHandler : DisposableMediatorSubscriberBase
         {
             foreach (var chara in _handledCharaData)
             {
-                RevertHandledChara(chara);
+                Task.Run(() => RevertHandledChara(chara));
             }
         });
 
@@ -56,7 +56,7 @@ public sealed class CharaDataCharacterHandler : DisposableMediatorSubscriberBase
         base.Dispose(disposing);
         foreach (var chara in _handledCharaData)
         {
-            RevertHandledChara(chara);
+            Task.Run(() => RevertHandledChara(chara));
         }
     }
 

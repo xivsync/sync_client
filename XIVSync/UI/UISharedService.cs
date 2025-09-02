@@ -160,6 +160,34 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         }
     }
 
+    public static void AttachThemedToolTip(string text, ThemePalette theme)
+    {
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            using (ImRaii.PushColor(ImGuiCol.PopupBg, theme.TooltipBg))
+            using (ImRaii.PushColor(ImGuiCol.Text, theme.TooltipText))
+            {
+                ImGui.BeginTooltip();
+                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
+                if (text.Contains(TooltipSeparator, StringComparison.Ordinal))
+                {
+                    var splitText = text.Split(TooltipSeparator, StringSplitOptions.RemoveEmptyEntries);
+                    for (int i = 0; i < splitText.Length; i++)
+                    {
+                        ImGui.TextUnformatted(splitText[i]);
+                        if (i != splitText.Length - 1) ImGui.Separator();
+                    }
+                }
+                else
+                {
+                    ImGui.TextUnformatted(text);
+                }
+                ImGui.PopTextWrapPos();
+                ImGui.EndTooltip();
+            }
+        }
+    }
+
     public static string ByteToString(long bytes, bool addSuffix = true)
     {
         string[] suffix = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -1012,8 +1040,20 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
     public bool IconButton(FontAwesomeIcon icon, float? height = null)
     {
         string text = icon.ToIconString();
+        var theme = GetCurrentTheme();
 
         ImGui.PushID(text);
+        
+        // Apply theme button colors if theme is available
+        int colorCount = 0;
+        if (theme != null)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, theme.Btn);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, theme.BtnHovered);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, theme.BtnActive);
+            colorCount = 3;
+        }
+        
         Vector2 vector;
         using (IconFont.Push())
             vector = ImGui.CalcTextSize(text);
@@ -1022,11 +1062,29 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float x = vector.X + ImGui.GetStyle().FramePadding.X * 2f;
         float frameHeight = height ?? ImGui.GetFrameHeight();
         bool result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+        
+        // Use theme button text colors based on button state
+        uint textColor = ImGui.GetColorU32(ImGuiCol.Text);
+        if (theme != null)
+        {
+            if (ImGui.IsItemActive())
+                textColor = ImGui.GetColorU32(theme.BtnTextActive);
+            else if (ImGui.IsItemHovered())
+                textColor = ImGui.GetColorU32(theme.BtnTextHovered);
+            else
+                textColor = ImGui.GetColorU32(theme.BtnText);
+        }
+        
         Vector2 pos = new Vector2(cursorScreenPos.X + ImGui.GetStyle().FramePadding.X,
             cursorScreenPos.Y + (height ?? ImGui.GetFrameHeight()) / 2f - (vector.Y / 2f));
         using (IconFont.Push())
-            windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), text);
+            windowDrawList.AddText(pos, textColor, text);
         ImGui.PopID();
+        
+        if (colorCount > 0)
+        {
+            ImGui.PopStyleColor(colorCount);
+        }
 
         return result;
     }
@@ -1043,7 +1101,8 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
     public bool IconTextButton(FontAwesomeIcon icon, string text, float? width = null, bool isInPopup = false)
     {
-        return IconTextButtonInternal(icon, text,
+        var theme = GetCurrentTheme();
+        return IconTextButtonInternal(icon, text, theme,
             isInPopup ? ColorHelpers.RgbaUintToVector4(ImGui.GetColorU32(ImGuiCol.PopupBg)) : null,
             width <= 0 ? null : width);
     }
@@ -1083,6 +1142,7 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         base.Dispose(disposing);
 
+        _discordOAuthGetCts?.CancelDispose();
         UidFont.Dispose();
         GameFont.Dispose();
     }
@@ -1108,13 +1168,21 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         ImGui.TextUnformatted(text);
     }
 
-    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, Vector4? defaultColor = null, float? width = null)
+    private bool IconTextButtonInternal(FontAwesomeIcon icon, string text, ThemePalette? theme = null, Vector4? defaultColor = null, float? width = null)
     {
         int num = 0;
         if (defaultColor.HasValue)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, defaultColor.Value);
             num++;
+        }
+        else if (theme != null)
+        {
+            // Apply theme button colors
+            ImGui.PushStyleColor(ImGuiCol.Button, theme.Btn);
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, theme.BtnHovered);
+            ImGui.PushStyleColor(ImGuiCol.ButtonActive, theme.BtnActive);
+            num += 3;
         }
 
         ImGui.PushID(text);
@@ -1127,12 +1195,26 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
         float num2 = 3f * ImGuiHelpers.GlobalScale;
         float x = width ?? vector.X + vector2.X + ImGui.GetStyle().FramePadding.X * 2f + num2;
         float frameHeight = ImGui.GetFrameHeight();
+        
         bool result = ImGui.Button(string.Empty, new Vector2(x, frameHeight));
+        
+        // Use theme button text colors based on button state
+        uint textColor = ImGui.GetColorU32(ImGuiCol.Text);
+        if (theme != null)
+        {
+            if (ImGui.IsItemActive())
+                textColor = ImGui.GetColorU32(theme.BtnTextActive);
+            else if (ImGui.IsItemHovered())
+                textColor = ImGui.GetColorU32(theme.BtnTextHovered);
+            else
+                textColor = ImGui.GetColorU32(theme.BtnText);
+        }
+        
         Vector2 pos = new Vector2(cursorScreenPos.X + ImGui.GetStyle().FramePadding.X, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
         using (IconFont.Push())
-            windowDrawList.AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), icon.ToIconString());
+            windowDrawList.AddText(pos, textColor, icon.ToIconString());
         Vector2 pos2 = new Vector2(pos.X + vector.X + num2, cursorScreenPos.Y + ImGui.GetStyle().FramePadding.Y);
-        windowDrawList.AddText(pos2, ImGui.GetColorU32(ImGuiCol.Text), text);
+        windowDrawList.AddText(pos2, textColor, text);
         ImGui.PopID();
         if (num > 0)
         {
@@ -1141,6 +1223,11 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         return result;
     }
+    public ThemePalette? GetCurrentTheme()
+    {
+        return _configService.Current?.Theme;
+    }
+
     public sealed record IconScaleData(Vector2 IconSize, Vector2 NormalizedIconScale, float OffsetX, float IconScaling);
     private record UIDAliasPair(string? UID, string? Alias);
 }

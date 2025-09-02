@@ -35,7 +35,15 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     public override void Draw()
     {
-        _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
+        try
+        {
+            _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in {ClassName}.Draw() - {WindowName}", GetType().Name, WindowName);
+            throw;
+        }
     }
 
     protected abstract void DrawInternal();

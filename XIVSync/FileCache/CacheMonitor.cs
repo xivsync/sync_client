@@ -456,7 +456,7 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
-        _scanCancellationTokenSource?.Cancel();
+        _scanCancellationTokenSource?.CancelDispose();
         PenumbraWatcher?.Dispose();
         MareWatcher?.Dispose();
         _penumbraFswCts?.CancelDispose();

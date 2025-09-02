@@ -41,10 +41,7 @@ public sealed class PerformanceCollectorService : IHostedService
         finally
         {
             var elapsed = DateTime.UtcNow.Ticks - dt;
-#if DEBUG
-            if (TimeSpan.FromTicks(elapsed) > TimeSpan.FromMilliseconds(10))
-                _logger.LogWarning(">10ms spike on {counterName}: {time}", cn, TimeSpan.FromTicks(elapsed));
-#endif
+
             list.Add((TimeOnly.FromDateTime(DateTime.Now), elapsed));
         }
     }
@@ -68,10 +65,7 @@ public sealed class PerformanceCollectorService : IHostedService
         finally
         {
             var elapsed = DateTime.UtcNow.Ticks - dt;
-#if DEBUG
-            if (TimeSpan.FromTicks(elapsed) > TimeSpan.FromMilliseconds(10))
-                _logger.LogWarning(">10ms spike on {counterName}: {time}", cn, TimeSpan.FromTicks(elapsed));
-#endif
+
             list.Add(new(TimeOnly.FromDateTime(DateTime.Now), elapsed));
         }
     }
@@ -135,13 +129,13 @@ public sealed class PerformanceCollectorService : IHostedService
 
             if (pastEntries.Any())
             {
-                sb.Append((" " + TimeSpan.FromTicks(pastEntries.LastOrDefault() == default ? 0 : pastEntries.Last().Item2).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
+                sb.Append((" " + TimeSpan.FromTicks(pastEntries.LastOrDefault() == default ? 0 : pastEntries[pastEntries.Count - 1].Item2).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
                 sb.Append('|');
                 sb.Append((" " + TimeSpan.FromTicks(pastEntries.Max(m => m.Item2)).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
                 sb.Append('|');
                 sb.Append((" " + TimeSpan.FromTicks((long)pastEntries.Average(m => m.Item2)).TotalMilliseconds.ToString("0.00000", CultureInfo.InvariantCulture)).PadRight(15));
                 sb.Append('|');
-                sb.Append((" " + (pastEntries.LastOrDefault() == default ? "-" : pastEntries.Last().Item1.ToString("HH:mm:ss.ffff", CultureInfo.InvariantCulture))).PadRight(15, ' '));
+                sb.Append((" " + (pastEntries.LastOrDefault() == default ? "-" : pastEntries[pastEntries.Count - 1].Item1.ToString("HH:mm:ss.ffff", CultureInfo.InvariantCulture))).PadRight(15, ' '));
                 sb.Append('|');
                 sb.Append((" " + pastEntries.Count).PadRight(10));
                 sb.Append('|');
@@ -183,7 +177,7 @@ public sealed class PerformanceCollectorService : IHostedService
             {
                 try
                 {
-                    var last = entries.Value.ToList().Last();
+                    var last = entries.Value[entries.Value.Count - 1];
                     if (last.Item1.AddMinutes(10) < TimeOnly.FromDateTime(DateTime.Now) && !PerformanceCounters.TryRemove(entries.Key, out _))
                     {
                         _logger.LogDebug("Could not remove performance counter {counter}", entries.Key);

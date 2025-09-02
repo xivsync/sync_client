@@ -41,7 +41,7 @@ public class CharacterData
         }
     }
 
-    public API.Data.CharacterData ToAPI()
+    public API.Data.CharacterData ToAPI(bool muteOwnSounds = false)
     {
         Dictionary<ObjectKind, List<FileReplacementData>> fileReplacements =
             FileReplacements.ToDictionary(k => k.Key, k => k.Value.Where(f => f.HasFileReplacement && !f.IsFileSwap)
@@ -69,7 +69,7 @@ public class CharacterData
             HeelsData = HeelsData,
             CustomizePlusData = CustomizePlusScale.ToDictionary(d => d.Key, d => d.Value),
             HonorificData = HonorificData,
-            MoodlesData = MoodlesData,
+            MoodlesData = muteOwnSounds ? string.Empty : MoodlesData,
             PetNamesData = PetNamesData
         };
     }

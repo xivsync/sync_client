@@ -740,6 +740,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);
+        _conversionCancellationTokenSource?.CancelDispose();
         _conversionProgress.ProgressChanged -= ConversionProgress_ProgressChanged;
     }
 

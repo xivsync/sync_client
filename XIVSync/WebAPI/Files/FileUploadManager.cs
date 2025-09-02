@@ -83,20 +83,33 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
             return [.. filesToUpload.Where(f => f.IsForbidden).Select(f => f.Hash)];
         }
 
-        Task uploadTask = Task.CompletedTask;
-        int i = 1;
-        foreach (var file in filesToUpload)
+        progress.Report($"Starting parallel upload of {filesToUpload.Count} files...");
+        int completedFiles = 0;
+        
+        await Parallel.ForEachAsync(filesToUpload, new ParallelOptions()
         {
-            progress.Report($"Uploading file {i++}/{filesToUpload.Count}. Please wait until the upload is completed.");
-            Logger.LogDebug("[{hash}] Compressing", file);
-            var data = await _fileDbManager.GetCompressedFileData(file.Hash, ct ?? CancellationToken.None).ConfigureAwait(false);
-            Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
-            await uploadTask.ConfigureAwait(false);
-            uploadTask = UploadFile(data.Item2, file.Hash, false, ct ?? CancellationToken.None);
-            (ct ?? CancellationToken.None).ThrowIfCancellationRequested();
-        }
-
-        await uploadTask.ConfigureAwait(false);
+            MaxDegreeOfParallelism = _mareConfigService.Current.ParallelUploads,
+            CancellationToken = ct ?? CancellationToken.None,
+        },
+        async (file, token) =>
+        {
+            await _orchestrator.WaitForUploadSlotAsync(token).ConfigureAwait(false);
+            try
+            {
+                Logger.LogDebug("[{hash}] Compressing", file);
+                var data = await _fileDbManager.GetCompressedFileData(file.Hash, token).ConfigureAwait(false);
+                Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
+                await UploadFile(data.Item2, file.Hash, false, token).ConfigureAwait(false);
+                
+                var completed = Interlocked.Increment(ref completedFiles);
+                progress.Report($"Uploaded {completed}/{filesToUpload.Count} files");
+                token.ThrowIfCancellationRequested();
+            }
+            finally
+            {
+                _orchestrator.ReleaseUploadSlot();
+            }
+        }).ConfigureAwait(false);
 
         return [];
     }
@@ -265,22 +278,34 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
         }
 
         var totalSize = CurrentUploads.Sum(c => c.Total);
-        Logger.LogDebug("Compressing and uploading files");
-        Task uploadTask = Task.CompletedTask;
-        foreach (var file in CurrentUploads.Where(f => f.CanBeTransferred && !f.IsTransferred).ToList())
+        Logger.LogDebug("Compressing and uploading files in parallel");
+        
+        var filesToUploadInternal = CurrentUploads.Where(f => f.CanBeTransferred && !f.IsTransferred).ToList();
+        
+        if (filesToUploadInternal.Any())
         {
-            Logger.LogDebug("[{hash}] Compressing", file);
-            var data = await _fileDbManager.GetCompressedFileData(file.Hash, uploadToken).ConfigureAwait(false);
-            CurrentUploads.Single(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal)).Total = data.Item2.Length;
-            Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
-            await uploadTask.ConfigureAwait(false);
-            uploadTask = UploadFile(data.Item2, file.Hash, true, uploadToken);
-            uploadToken.ThrowIfCancellationRequested();
-        }
-
-        if (CurrentUploads.Any())
-        {
-            await uploadTask.ConfigureAwait(false);
+            await Parallel.ForEachAsync(filesToUploadInternal, new ParallelOptions()
+            {
+                MaxDegreeOfParallelism = _mareConfigService.Current.ParallelUploads,
+                CancellationToken = uploadToken,
+            },
+            async (file, token) =>
+            {
+                await _orchestrator.WaitForUploadSlotAsync(token).ConfigureAwait(false);
+                try
+                {
+                    Logger.LogDebug("[{hash}] Compressing", file);
+                    var data = await _fileDbManager.GetCompressedFileData(file.Hash, token).ConfigureAwait(false);
+                    CurrentUploads.Single(e => string.Equals(e.Hash, data.Item1, StringComparison.Ordinal)).Total = data.Item2.Length;
+                    Logger.LogDebug("[{hash}] Starting upload for {filePath}", data.Item1, _fileDbManager.GetFileCacheByHash(data.Item1)!.ResolvedFilepath);
+                    await UploadFile(data.Item2, file.Hash, true, token).ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
+                }
+                finally
+                {
+                    _orchestrator.ReleaseUploadSlot();
+                }
+            }).ConfigureAwait(false);
 
             var compressedSize = CurrentUploads.Sum(c => c.Total);
             Logger.LogDebug("Upload complete, compressed {size} to {compressed}", UiSharedService.ByteToString(totalSize), UiSharedService.ByteToString(compressedSize));

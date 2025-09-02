@@ -1,5 +1,6 @@
 ﻿using Dalamud.Utility;
 using XIVSync.API.Data;
+using XIVSync.API.Data.Enum;
 using XIVSync.API.Data.Extensions;
 using XIVSync.API.Dto;
 using XIVSync.API.Dto.User;
@@ -110,6 +111,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     public async Task CreateConnectionsAsync()
     {
+        
         if (!_serverManager.ShownCensusPopup)
         {
             Mediator.Publish(new OpenCensusPopupMessage());
@@ -123,15 +125,21 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
         if (_serverManager.CurrentServer?.FullPause ?? true)
         {
+
             Logger.LogInformation("Not recreating Connection, paused");
             _connectionDto = null;
             await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
-            _connectionCancellationTokenSource?.Cancel();
+            if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
             return;
         }
 
-        if (!_serverManager.CurrentServer.UseOAuth2)
+        bool useSecretKey = !_serverManager.CurrentServer.UseOAuth2;
+        
+
+
+        if (useSecretKey)
         {
+
             var secretKey = _serverManager.GetSecretKey(out bool multi);
             if (multi)
             {
@@ -140,22 +148,26 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
                 Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Mare.",
                     NotificationType.Error));
                 await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
                 return;
             }
 
             if (secretKey.IsNullOrEmpty())
             {
+
                 Logger.LogWarning("No secret key set for current character");
                 _connectionDto = null;
                 await StopConnectionAsync(ServerState.NoSecretKey).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
                 return;
             }
+
         }
         else
         {
+
             var oauth2 = _serverManager.GetOAuth2(out bool multi);
+
             if (multi)
             {
                 Logger.LogWarning("Multiple secret keys for current character");
@@ -163,27 +175,31 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
                 Mediator.Publish(new NotificationMessage("Multiple Identical Characters detected", "Your Service configuration has multiple characters with the same name and world set up. Delete the duplicates in the character management to be able to connect to Mare.",
                     NotificationType.Error));
                 await StopConnectionAsync(ServerState.MultiChara).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
                 return;
             }
 
             if (!oauth2.HasValue)
             {
+
                 Logger.LogWarning("No UID/OAuth set for current character");
                 _connectionDto = null;
                 await StopConnectionAsync(ServerState.OAuthMisconfigured).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
                 return;
             }
 
-            if (!await _tokenProvider.TryUpdateOAuth2LoginTokenAsync(_serverManager.CurrentServer).ConfigureAwait(false))
+
+            var tokenUpdateSuccess = await _tokenProvider.TryUpdateOAuth2LoginTokenAsync(_serverManager.CurrentServer).ConfigureAwait(false);
+            if (!tokenUpdateSuccess)
             {
                 Logger.LogWarning("OAuth2 login token could not be updated");
                 _connectionDto = null;
                 await StopConnectionAsync(ServerState.OAuthLoginTokenStale).ConfigureAwait(false);
-                _connectionCancellationTokenSource?.Cancel();
+                if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
                 return;
             }
+
         }
 
         await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false);
@@ -192,7 +208,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         Mediator.Publish(new EventMessage(new Services.Events.Event(nameof(ApiController), Services.Events.EventSeverity.Informational,
             $"Starting Connection to {_serverManager.CurrentServer.ServerName}")));
 
-        _connectionCancellationTokenSource?.Cancel();
+        if (_connectionCancellationTokenSource != null) await _connectionCancellationTokenSource.CancelAsync();
         _connectionCancellationTokenSource?.Dispose();
         _connectionCancellationTokenSource = new CancellationTokenSource();
         var token = _connectionCancellationTokenSource.Token;
@@ -224,6 +240,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
                 }
 
                 if (token.IsCancellationRequested) break;
+
+
 
                 _mareHub = _hubFactory.GetOrCreate(token);
                 InitializeApiHooks();
@@ -307,6 +325,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
                 if (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
+
                     await StopConnectionAsync(ServerState.Unauthorized).ConfigureAwait(false);
                     return;
                 }
@@ -403,6 +422,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
         return Task.CompletedTask;
     }
 
+
+
     public Task<ConnectionDto> GetConnectionDto() => GetConnectionDtoAsync(true);
 
 
@@ -429,7 +450,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
         _healthCheckTokenSource?.Cancel();
         _ = Task.Run(async () => await StopConnectionAsync(ServerState.Disconnected).ConfigureAwait(false));
-        _connectionCancellationTokenSource?.Cancel();
+        if (_connectionCancellationTokenSource != null) Task.Run(() => _connectionCancellationTokenSource.CancelAsync());
     }
 
     private async Task ClientHealthCheckAsync(CancellationToken ct)
@@ -449,9 +470,14 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
 
     private void DalamudUtilOnLogIn()
     {
+
         var charaName = _dalamudUtil.GetPlayerNameAsync().GetAwaiter().GetResult();
         var worldId = _dalamudUtil.GetHomeWorldIdAsync().GetAwaiter().GetResult();
+
         var auth = _serverManager.CurrentServer.Authentications.Find(f => string.Equals(f.CharacterName, charaName, StringComparison.Ordinal) && f.WorldId == worldId);
+        
+
+        
         if (auth?.AutoLogin ?? false)
         {
             Logger.LogInformation("Logging into {chara}", charaName);
@@ -672,4 +698,6 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IM
     }
 
 }
+#pragma warning restore MA0040
+#pragma warning restore MA0040
 #pragma warning restore MA0040

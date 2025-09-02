@@ -58,6 +58,13 @@ public class DrawUserPair
     public Pair Pair => _pair;
     public UserFullPairDto UserPair => _pair.UserPair!;
 
+    private ThemePalette GetCurrentTheme()
+    {
+        // Access theme from UiSharedService which should have access to configuration
+        // If no theme is available, return default
+        return _uiSharedService.GetCurrentTheme() ?? new ThemePalette();
+    }
+
     public void DrawPairedClient()
     {
         using var id = ImRaii.PushId(GetType() + _id);
@@ -501,6 +508,11 @@ public class DrawUserPair
 
         if (ImGui.BeginPopup("User Flyout Menu"))
         {
+            // Apply tooltip styling to the popup menu
+            var theme = GetCurrentTheme();
+            using var popupBg = ImRaii.PushColor(ImGuiCol.PopupBg, theme.TooltipBg);
+            using var textColor = ImRaii.PushColor(ImGuiCol.Text, theme.TooltipText);
+            
             using (ImRaii.PushId($"buttons-{_pair.UserData.UID}"))
             {
                 ImGui.TextUnformatted("Common Pair Functions");

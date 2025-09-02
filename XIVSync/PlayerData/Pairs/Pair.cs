@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 
 namespace XIVSync.PlayerData.Pairs;
 
-public class Pair
+public class Pair : IDisposable
 {
     private readonly PairHandlerFactory _cachedPlayerFactory;
     private readonly SemaphoreSlim _creationSemaphore = new(1);
@@ -253,5 +253,12 @@ public class Pair
         }
 
         return data;
+    }
+
+    public void Dispose()
+    {
+        _applicationCts?.CancelDispose();
+        _creationSemaphore?.Dispose();
+        CachedPlayer?.Dispose();
     }
 }

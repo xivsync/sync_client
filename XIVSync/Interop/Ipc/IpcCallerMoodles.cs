@@ -4,6 +4,7 @@ using Dalamud.Plugin.Ipc;
 using XIVSync.Services;
 using XIVSync.Services.Mediator;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace XIVSync.Interop.Ipc;
 
@@ -27,12 +28,11 @@ public sealed class IpcCallerMoodles : IIpcCaller
 
         _moodlesApiVersion = pi.GetIpcSubscriber<int>("Moodles.Version");
         _moodlesOnChange = pi.GetIpcSubscriber<IPlayerCharacter, object>("Moodles.StatusManagerModified");
-        _moodlesGetStatus = pi.GetIpcSubscriber<nint, string>("Moodles.GetStatusManagerByPtr");
-        _moodlesSetStatus = pi.GetIpcSubscriber<nint, string, object>("Moodles.SetStatusManagerByPtr");
-        _moodlesRevertStatus = pi.GetIpcSubscriber<nint, object>("Moodles.ClearStatusManagerByPtr");
+        _moodlesGetStatus = pi.GetIpcSubscriber<nint, string>("Moodles.GetStatusManagerByPtrV2");
+        _moodlesSetStatus = pi.GetIpcSubscriber<nint, string, object>("Moodles.SetStatusManagerByPtrV2");
+        _moodlesRevertStatus = pi.GetIpcSubscriber<nint, object>("Moodles.ClearStatusManagerByPtrV2");
 
         _moodlesOnChange.Subscribe(OnMoodlesChange);
-
         CheckAPI();
     }
 
@@ -45,12 +45,17 @@ public sealed class IpcCallerMoodles : IIpcCaller
 
     public void CheckAPI()
     {
+        // Support multiple known API versions (add new versions as Moodles updates)
+        var supportedVersions = new[] { 1, 2, 3 }; // Add more versions as they become available
+        
         try
         {
-            APIAvailable = _moodlesApiVersion.InvokeFunc() == 1;
+            var moodlesVersion = _moodlesApiVersion.InvokeFunc();
+            APIAvailable = supportedVersions.Contains(moodlesVersion);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning("Failed to get Moodles API version: {Exception}", ex.Message);
             APIAvailable = false;
         }
     }
@@ -66,8 +71,8 @@ public sealed class IpcCallerMoodles : IIpcCaller
 
         try
         {
-            return await _dalamudUtil.RunOnFrameworkThread(() => _moodlesGetStatus.InvokeFunc(address)).ConfigureAwait(false);
-
+            var result = await _dalamudUtil.RunOnFrameworkThread(() => _moodlesGetStatus.InvokeFunc(address)).ConfigureAwait(false);
+            return result;
         }
         catch (Exception e)
         {
@@ -79,6 +84,7 @@ public sealed class IpcCallerMoodles : IIpcCaller
     public async Task SetStatusAsync(nint pointer, string status)
     {
         if (!APIAvailable) return;
+        
         try
         {
             await _dalamudUtil.RunOnFrameworkThread(() => _moodlesSetStatus.InvokeAction(pointer, status)).ConfigureAwait(false);
@@ -92,13 +98,14 @@ public sealed class IpcCallerMoodles : IIpcCaller
     public async Task RevertStatusAsync(nint pointer)
     {
         if (!APIAvailable) return;
+        
         try
         {
             await _dalamudUtil.RunOnFrameworkThread(() => _moodlesRevertStatus.InvokeAction(pointer)).ConfigureAwait(false);
         }
         catch (Exception e)
         {
-            _logger.LogWarning(e, "Could not Set Moodles Status");
+            _logger.LogWarning(e, "Could not Revert Moodles Status");
         }
     }
 }

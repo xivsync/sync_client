@@ -8,7 +8,7 @@ using System.Collections.Concurrent;
 
 namespace XIVSync.Interop.Ipc;
 
-public class RedrawManager
+public class RedrawManager : IDisposable
 {
     private readonly MareMediator _mareMediator;
     private readonly DalamudUtilService _dalamudUtil;
@@ -50,5 +50,11 @@ public class RedrawManager
     internal void Cancel()
     {
         _disposalCts = _disposalCts.CancelRecreate();
+    }
+
+    public void Dispose()
+    {
+        _disposalCts?.CancelDispose();
+        RedrawSemaphore?.Dispose();
     }
 }

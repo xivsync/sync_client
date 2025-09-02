@@ -9,6 +9,8 @@ using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
+using System.Text;
+using System.Runtime.InteropServices;
 
 namespace XIVSync.UI;
 
@@ -23,6 +25,19 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
     private string _filterUid = string.Empty;
     private string _filterSource = string.Empty;
     private string _filterEvent = string.Empty;
+    
+    // Category-based filtering
+    private bool _filterPlugin = true;
+    private bool _filterAuth = true;
+    private bool _filterServices = true;
+    private bool _filterNetwork = true;
+    private bool _filterFile = true;
+    private bool _filterOther = true;
+    
+    // Severity filtering
+    private bool _filterInfo = true;
+    private bool _filterWarning = true;
+    private bool _filterError = true;
 
     private List<Event> CurrentEvents
     {
@@ -55,6 +70,7 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
     {
         return new(() =>
             CurrentEvents.Where(f =>
+                // Text-based filters
                 (string.IsNullOrEmpty(_filterFreeText)
                 || (f.EventSource.Contains(_filterFreeText, StringComparison.OrdinalIgnoreCase)
                     || f.Character.Contains(_filterFreeText, StringComparison.OrdinalIgnoreCase)
@@ -77,7 +93,40 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
                 (string.IsNullOrEmpty(_filterEvent)
                     || (f.Message.Contains(_filterEvent, StringComparison.OrdinalIgnoreCase))
                 )
+                &&
+                // Category-based filters
+                (GetEventCategory(f.EventSource) switch
+                {
+                    "Plugin" => _filterPlugin,
+                    "Auth" => _filterAuth,
+                    "Services" => _filterServices,
+                    "Network" => _filterNetwork,
+                    "File" => _filterFile,
+                    _ => _filterOther
+                })
+                &&
+                // Severity-based filters
+                (f.EventSeverity switch
+                {
+                    EventSeverity.Informational => _filterInfo,
+                    EventSeverity.Warning => _filterWarning,
+                    EventSeverity.Error => _filterError,
+                    _ => true
+                })
              ).ToList());
+    }
+    
+    private static string GetEventCategory(string eventSource)
+    {
+        return eventSource.ToLowerInvariant() switch
+        {
+            var source when source.Contains("plugin") || source.Contains("ui") || source.Contains("window") => "Plugin",
+            var source when source.Contains("auth") || source.Contains("login") || source.Contains("token") => "Auth",
+            var source when source.Contains("service") || source.Contains("manager") || source.Contains("controller") => "Services",
+            var source when source.Contains("network") || source.Contains("connection") || source.Contains("signalr") || source.Contains("api") => "Network",
+            var source when source.Contains("file") || source.Contains("cache") || source.Contains("download") || source.Contains("upload") => "File",
+            _ => "Other"
+        };
     }
 
     private void ClearFilters()
@@ -87,7 +136,45 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
         _filterUid = string.Empty;
         _filterSource = string.Empty;
         _filterEvent = string.Empty;
+        
+        // Reset category filters to show all
+        _filterPlugin = true;
+        _filterAuth = true;
+        _filterServices = true;
+        _filterNetwork = true;
+        _filterFile = true;
+        _filterOther = true;
+        
+        // Reset severity filters to show all
+        _filterInfo = true;
+        _filterWarning = true;
+        _filterError = true;
+        
         _filteredEvents = RecreateFilter();
+    }
+    
+    private void CopyLogsToClipboard()
+    {
+        try
+        {
+            var logText = new StringBuilder();
+            foreach (var ev in _filteredEvents.Value)
+            {
+                logText.AppendLine(ev.ToString());
+            }
+            
+            if (logText.Length > 0)
+            {
+                // Use ImGui's built-in clipboard functionality
+                ImGui.SetClipboardText(logText.ToString());
+                // You could add a notification here if you have a notification system
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log error or show notification
+            System.Diagnostics.Debug.WriteLine($"Failed to copy logs to clipboard: {ex.Message}");
+        }
     }
 
     public override void OnOpen()
@@ -113,9 +200,20 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
             UiSharedService.ColorTextWrapped("New events are available, press refresh to update", ImGuiColors.DalamudYellow);
         }
 
-        var buttonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.FolderOpen, "Open EventLog Folder");
-        var dist = ImGui.GetWindowContentRegionMax().X - buttonSize;
+        // Add copy to clipboard button
+        var copyButtonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.Copy, "Copy to Clipboard");
+        var folderButtonSize = _uiSharedService.GetIconTextButtonSize(FontAwesomeIcon.FolderOpen, "Open EventLog Folder");
+        var totalButtonWidth = copyButtonSize + folderButtonSize + ImGui.GetStyle().ItemSpacing.X;
+        var dist = ImGui.GetWindowContentRegionMax().X - totalButtonWidth;
+        
         ImGui.SameLine(dist);
+        if (_uiSharedService.IconTextButton(FontAwesomeIcon.Copy, "Copy to Clipboard"))
+        {
+            CopyLogsToClipboard();
+        }
+        UiSharedService.AttachToolTip("Copy filtered logs to clipboard");
+        
+        ImGui.SameLine();
         if (_uiSharedService.IconTextButton(FontAwesomeIcon.FolderOpen, "Open EventLog folder"))
         {
             ProcessStartInfo ps = new()
@@ -135,7 +233,11 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
             {
                 ClearFilters();
             }
+            
             bool changedFilter = false;
+            
+            // Text-based filters
+            ImGui.Text("Text Filters:");
             ImGui.SetNextItemWidth(200);
             changedFilter |= ImGui.InputText("Search all columns", ref _filterFreeText, 50);
             ImGui.SetNextItemWidth(200);
@@ -146,6 +248,31 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
             changedFilter |= ImGui.InputText("Filter by Character", ref _filterCharacter, 50);
             ImGui.SetNextItemWidth(200);
             changedFilter |= ImGui.InputText("Filter by Event", ref _filterEvent, 50);
+            
+            ImGui.Separator();
+            
+            // Category filters
+            ImGui.Text("Categories:");
+            ImGui.Columns(3, "CategoryColumns", false);
+            changedFilter |= ImGui.Checkbox("Plugin", ref _filterPlugin);
+            changedFilter |= ImGui.Checkbox("Auth", ref _filterAuth);
+            changedFilter |= ImGui.Checkbox("Services", ref _filterServices);
+            ImGui.NextColumn();
+            changedFilter |= ImGui.Checkbox("Network", ref _filterNetwork);
+            changedFilter |= ImGui.Checkbox("File", ref _filterFile);
+            changedFilter |= ImGui.Checkbox("Other", ref _filterOther);
+            ImGui.Columns(1);
+            
+            ImGui.Separator();
+            
+            // Severity filters
+            ImGui.Text("Severity:");
+            ImGui.Columns(3, "SeverityColumns", false);
+            changedFilter |= ImGui.Checkbox("Info", ref _filterInfo);
+            changedFilter |= ImGui.Checkbox("Warning", ref _filterWarning);
+            changedFilter |= ImGui.Checkbox("Error", ref _filterError);
+            ImGui.Columns(1);
+            
             if (changedFilter) _filteredEvents = RecreateFilter();
         }
         foldOut.Dispose();

@@ -18,8 +18,11 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
     private readonly object _semaphoreModificationLock = new();
     private readonly TokenProvider _tokenProvider;
     private int _availableDownloadSlots;
+    private int _availableUploadSlots;
     private SemaphoreSlim _downloadSemaphore;
+    private SemaphoreSlim _uploadSemaphore;
     private int CurrentlyUsedDownloadSlots => _availableDownloadSlots - _downloadSemaphore.CurrentCount;
+    private int CurrentlyUsedUploadSlots => _availableUploadSlots - _uploadSemaphore.CurrentCount;
 
     public FileTransferOrchestrator(ILogger<FileTransferOrchestrator> logger, MareConfigService mareConfig,
         MareMediator mediator, TokenProvider tokenProvider, HttpClient httpClient) : base(logger, mediator)
@@ -32,6 +35,9 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
 
         _availableDownloadSlots = mareConfig.Current.ParallelDownloads;
         _downloadSemaphore = new(_availableDownloadSlots, _availableDownloadSlots);
+        
+        _availableUploadSlots = mareConfig.Current.ParallelUploads;
+        _uploadSemaphore = new(_availableUploadSlots, _availableUploadSlots);
 
         Mediator.Subscribe<ConnectedMessage>(this, (msg) =>
         {
@@ -80,6 +86,18 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
         }
     }
 
+    public void ReleaseUploadSlot()
+    {
+        try
+        {
+            _uploadSemaphore.Release();
+        }
+        catch (SemaphoreFullException)
+        {
+            // ignore
+        }
+    }
+
     public async Task<HttpResponseMessage> SendRequestAsync(HttpMethod method, Uri uri,
         CancellationToken? ct = null, HttpCompletionOption httpCompletionOption = HttpCompletionOption.ResponseContentRead)
     {
@@ -117,6 +135,20 @@ public class FileTransferOrchestrator : DisposableMediatorSubscriberBase
 
         await _downloadSemaphore.WaitAsync(token).ConfigureAwait(false);
         Mediator.Publish(new DownloadLimitChangedMessage());
+    }
+
+    public async Task WaitForUploadSlotAsync(CancellationToken token)
+    {
+        lock (_semaphoreModificationLock)
+        {
+            if (_availableUploadSlots != _mareConfig.Current.ParallelUploads && _availableUploadSlots == _uploadSemaphore.CurrentCount)
+            {
+                _availableUploadSlots = _mareConfig.Current.ParallelUploads;
+                _uploadSemaphore = new(_availableUploadSlots, _availableUploadSlots);
+            }
+        }
+
+        await _uploadSemaphore.WaitAsync(token).ConfigureAwait(false);
     }
 
     public long DownloadLimitPerSlot()

@@ -38,9 +38,7 @@ public sealed class Plugin : IDalamudPlugin
 {
     private readonly IHost _host;
 
-#if DEBUG
-    private DevAutoReloader? _dev;
-#endif
+
 
     public Plugin(IDalamudPluginInterface pluginInterface, ICommandManager commandManager, IDataManager gameData,
         IFramework framework, IObjectTable objectTable, IClientState clientState, ICondition condition, IChatGui chatGui,
@@ -75,12 +73,16 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        // Create a single UILoggingProvider instance to be shared
+        var uiLoggingProvider = new XIVSync.Interop.UILoggingProvider();
+        
         _host = new HostBuilder()
         .UseContentRoot(pluginInterface.ConfigDirectory.FullName)
         .ConfigureLogging(lb =>
         {
             lb.ClearProviders();
             lb.AddDalamudLogging(pluginLog, gameData.HasModifiedGameDataFiles);
+            lb.AddUILogging(uiLoggingProvider);
             lb.AddFile(Path.Combine(traceDir, $"xivsync-trace-{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.log"), (opt) =>
             {
                 opt.Append = true;
@@ -117,6 +119,8 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton<FileCompactor>();
             collection.AddSingleton<TagHandler>();
             collection.AddSingleton<IdDisplayHandler>();
+            collection.AddSingleton<XIVSync.UI.Theming.ModernThemeService>();
+
             collection.AddSingleton<PlayerPerformanceService>();
             collection.AddSingleton<TransientResourceManager>();
 
@@ -129,11 +133,15 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddSingleton(s => new VfxSpawnManager(s.GetRequiredService<ILogger<VfxSpawnManager>>(),
                 gameInteropProvider, s.GetRequiredService<MareMediator>()));
             collection.AddSingleton((s) => new BlockedCharacterHandler(s.GetRequiredService<ILogger<BlockedCharacterHandler>>(), gameInteropProvider));
+            // Temporarily disabled LocalSoundController - local muting not working as expected
+            // collection.AddSingleton((s) => new LocalSoundController(s.GetRequiredService<ILogger<LocalSoundController>>(),
+            //     s.GetRequiredService<MareConfigService>(), s.GetRequiredService<MareMediator>()));
             collection.AddSingleton((s) => new IpcProvider(s.GetRequiredService<ILogger<IpcProvider>>(),
                 pluginInterface,
                 s.GetRequiredService<CharaDataManager>(),
                 s.GetRequiredService<MareMediator>()));
             collection.AddSingleton<SelectPairForTagUi>();
+            collection.AddSingleton(uiLoggingProvider);
             collection.AddSingleton((s) => new EventAggregator(pluginInterface.ConfigDirectory.FullName,
                 s.GetRequiredService<ILogger<EventAggregator>>(), s.GetRequiredService<MareMediator>()));
             collection.AddSingleton((s) => new DalamudUtilService(s.GetRequiredService<ILogger<DalamudUtilService>>(),
@@ -200,7 +208,7 @@ public sealed class Plugin : IDalamudPlugin
             collection.AddScoped<CacheMonitor>();
             collection.AddScoped<UiFactory>();
             collection.AddScoped<SelectTagForPairUi>();
-            collection.AddScoped<WindowMediatorSubscriberBase, SettingsUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, ModernSettingsUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, CompactUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, IntroUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, DownloadUi>();
@@ -246,19 +254,13 @@ public sealed class Plugin : IDalamudPlugin
         })
         .Build();
 
-#if DEBUG
-        try { _dev = new DevAutoReloader(commandManager, watchForDllChanges: true); } catch { }
-#endif
+
 
         _ = _host.StartAsync();
     }
 
     public void Dispose()
     {
-#if DEBUG
-        _dev?.Dispose();
-        _dev = null;
-#endif
         _host.StopAsync().GetAwaiter().GetResult();
         _host.Dispose();
     }
