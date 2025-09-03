@@ -69,7 +69,7 @@ public class CharacterData
             HeelsData = HeelsData,
             CustomizePlusData = CustomizePlusScale.ToDictionary(d => d.Key, d => d.Value),
             HonorificData = HonorificData,
-            MoodlesData = muteOwnSounds ? string.Empty : MoodlesData,
+            MoodlesData = MoodlesData,
             PetNamesData = PetNamesData
         };
     }
